@@ -497,8 +497,8 @@ export default function Home() {
   return (
     <div className="grow flex flex-col min-h-screen relative overflow-hidden bg-[#070a13] text-slate-100">
       {/* Background Neon Gradients */}
-      <div className="absolute top-[-10%] left-[-10%] w-[45vw] h-[45vw] rounded-full opacity-20 blur-[120px] bg-linear-to-br from-indigo-500 to-purple-600 pointer-events-none animate-glow" />
-      <div className="absolute bottom-[-10%] right-[-10%] w-[45vw] h-[45vw] rounded-full opacity-25 blur-[120px] bg-linear-to-br from-indigo-600 to-cyan-500 pointer-events-none animate-glow" />
+      <div className="absolute top-[-10%] left-[-10%] w-[45vw] h-[45vw] rounded-full opacity-10 blur-[120px] bg-linear-to-br from-blue-500 to-indigo-800 pointer-events-none animate-glow" />
+      <div className="absolute bottom-[-10%] right-[-10%] w-[45vw] h-[45vw] rounded-full opacity-15 blur-[120px] bg-linear-to-br from-indigo-800 to-cyan-600 pointer-events-none animate-glow" />
 
       {/* Header Bar */}
       <header className="glass-panel border-b border-white/5 py-4 px-6 flex justify-between items-center z-25 sticky top-0">
@@ -514,7 +514,7 @@ export default function Home() {
             />
           </div>
           <div>
-            <h1 className="text-lg font-black tracking-wider bg-linear-to-r from-indigo-300 via-violet-300 to-purple-400 bg-clip-text text-transparent flex items-center gap-1.5">
+            <h1 className="text-lg font-black tracking-wider bg-linear-to-r from-indigo-200 via-sky-200 to-cyan-300 bg-clip-text text-transparent flex items-center gap-1.5">
               ScripLens <span className="text-[10px] font-bold text-indigo-400 bg-indigo-500/10 px-1.5 py-0.5 rounded-full border border-indigo-500/20 uppercase tracking-widest">v1 MVP</span>
             </h1>
           </div>
