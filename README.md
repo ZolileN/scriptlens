@@ -29,8 +29,25 @@ To learn more about Next.js, take a look at the following resources:
 
 You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
 
-## Deploy on Vercel
+## Deploy on Cloudflare Pages (Static HTML Export)
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+This project is configured for **Next.js Static HTML Export** (`output: 'export'`), meaning the entire application—including Layer 1 (compromise parser) and Layer 2 (WebLLM web worker)—runs fully client-side. This makes it extremely fast and cost-effective to deploy on Cloudflare Pages.
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+### Option 1: Git Integration (Recommended)
+1. Push your code to a Git repository (GitHub/GitLab).
+2. Go to the [Cloudflare Dashboard](https://dash.cloudflare.com/) and navigate to **Workers & Pages** > **Create application** > **Pages** > **Connect to Git**.
+3. Choose your repository and set the following build settings:
+   - **Framework preset**: `Next.js (Static HTML Export)`
+   - **Build command**: `npm run build`
+   - **Build output directory**: `out`
+4. Click **Save and Deploy**.
+
+### Option 2: Wrangler CLI
+You can deploy directly from your local terminal using Wrangler:
+```bash
+# Build the static export
+npm run build
+
+# Deploy to Cloudflare Pages
+npx wrangler pages deploy
+```
