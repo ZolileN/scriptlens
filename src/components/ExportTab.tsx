@@ -301,8 +301,8 @@ ${suggestions.map((sug, idx) => `${idx + 1}. [${sug.severity.toUpperCase()}] ${s
           </div>
         </div>
 
-        <div className="flex-grow bg-slate-950/80 border border-slate-900 rounded-xl overflow-hidden flex">
-          <pre className="flex-grow p-4 font-mono text-[10px] text-slate-300 overflow-y-auto whitespace-pre-wrap leading-normal select-all">
+        <div className="grow bg-slate-950/80 border border-slate-900 rounded-xl overflow-hidden flex">
+          <pre className="grow p-4 font-mono text-[10px] text-slate-300 overflow-y-auto whitespace-pre-wrap leading-normal select-all">
             {getActivePreviewContent()}
           </pre>
         </div>

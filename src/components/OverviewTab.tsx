@@ -89,7 +89,7 @@ export default function OverviewTab({ stats, scoring }: OverviewTabProps) {
             </div>
           </div>
 
-          <div className={`mt-5 px-3 py-1.5 rounded-full text-xs font-bold bg-gradient-to-r ${getScoreBgColor(scoring.overallScore)} shadow-inner`}>
+          <div className={`mt-5 px-3 py-1.5 rounded-full text-xs font-bold bg-linear-to-r ${getScoreBgColor(scoring.overallScore)} shadow-inner`}>
             {scoring.category}
           </div>
 
@@ -113,7 +113,7 @@ export default function OverviewTab({ stats, scoring }: OverviewTabProps) {
                 </div>
                 <div className="h-2 w-full bg-slate-800 rounded-full overflow-hidden">
                   <div
-                    className="h-full bg-gradient-to-r from-indigo-500 to-indigo-400 rounded-full transition-all duration-1000"
+                    className="h-full bg-linear-to-r from-indigo-500 to-indigo-400 rounded-full transition-all duration-1000"
                     style={{ width: `${scoring.sentenceVariationScore}%` }}
                   />
                 </div>
@@ -127,7 +127,7 @@ export default function OverviewTab({ stats, scoring }: OverviewTabProps) {
                 </div>
                 <div className="h-2 w-full bg-slate-800 rounded-full overflow-hidden">
                   <div
-                    className="h-full bg-gradient-to-r from-violet-500 to-violet-400 rounded-full transition-all duration-1000"
+                    className="h-full bg-linear-to-r from-violet-500 to-violet-400 rounded-full transition-all duration-1000"
                     style={{ width: `${scoring.vocabDiversityScore}%` }}
                   />
                 </div>
@@ -141,7 +141,7 @@ export default function OverviewTab({ stats, scoring }: OverviewTabProps) {
                 </div>
                 <div className="h-2 w-full bg-slate-800 rounded-full overflow-hidden">
                   <div
-                    className="h-full bg-gradient-to-r from-fuchsia-500 to-fuchsia-400 rounded-full transition-all duration-1000"
+                    className="h-full bg-linear-to-r from-fuchsia-500 to-fuchsia-400 rounded-full transition-all duration-1000"
                     style={{ width: `${scoring.repetitionScore}%` }}
                   />
                 </div>
@@ -155,7 +155,7 @@ export default function OverviewTab({ stats, scoring }: OverviewTabProps) {
                 </div>
                 <div className="h-2 w-full bg-slate-800 rounded-full overflow-hidden">
                   <div
-                    className="h-full bg-gradient-to-r from-cyan-500 to-cyan-400 rounded-full transition-all duration-1000"
+                    className="h-full bg-linear-to-r from-cyan-500 to-cyan-400 rounded-full transition-all duration-1000"
                     style={{ width: `${scoring.readabilitySpreadScore}%` }}
                   />
                 </div>
@@ -169,7 +169,7 @@ export default function OverviewTab({ stats, scoring }: OverviewTabProps) {
                 </div>
                 <div className="h-2 w-full bg-slate-800 rounded-full overflow-hidden">
                   <div
-                    className="h-full bg-gradient-to-r from-teal-500 to-teal-400 rounded-full transition-all duration-1000"
+                    className="h-full bg-linear-to-r from-teal-500 to-teal-400 rounded-full transition-all duration-1000"
                     style={{ width: `${scoring.paragraphDistributionScore}%` }}
                   />
                 </div>

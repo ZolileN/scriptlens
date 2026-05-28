@@ -4,21 +4,26 @@ import React, { useState, useEffect, useRef, useTransition } from 'react';
 import Image from 'next/image';
 import {
   Sparkles,
-  Layers,
   ArrowRight,
   ShieldCheck,
   RefreshCw,
   FileDown,
   UploadCloud,
   Eraser,
-  HelpCircle,
   FileText
 } from 'lucide-react';
+import type { WebWorkerMLCEngine, InitProgressReport, ChatCompletionMessageParam } from '@mlc-ai/web-llm';
 
 import { analyzeStatistics, TextStatistics } from '../lib/analysis/statistics';
 import { analyzePatterns, PatternAnalysis } from '../lib/analysis/patterns';
 import { calculateWritingScore, ScoringDetails } from '../lib/analysis/scoring';
-import { generateSuggestions, Suggestion } from '../lib/analysis/suggestions';
+import { generateSuggestions, Suggestion, detectHighlights, HighlightOccurrence } from '../lib/analysis/suggestions';
+
+interface NavigatorWithGpu extends Navigator {
+  gpu?: {
+    requestAdapter?: () => Promise<unknown>;
+  };
+}
 
 // Components
 import OverviewTab from '../components/OverviewTab';
@@ -50,6 +55,263 @@ export default function Home() {
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const backdropRef = useRef<HTMLDivElement>(null);
+
+  const [showHighlights, setShowHighlights] = useState(true);
+
+  // WebLLM on-demand generative rewrite states
+  const [aiState, setAiState] = useState<{
+    status: 'idle' | 'loading' | 'generating' | 'error';
+    progress: number;
+    output: string;
+    errorMsg?: string;
+    activeSuggestionId?: string;
+  }>({
+    status: 'idle',
+    progress: 0,
+    output: '',
+  });
+
+  const workerRef = useRef<Worker | null>(null);
+  const engineRef = useRef<WebWorkerMLCEngine | null>(null);
+
+  const handleScroll = () => {
+    if (textareaRef.current && backdropRef.current) {
+      backdropRef.current.scrollTop = textareaRef.current.scrollTop;
+      backdropRef.current.scrollLeft = textareaRef.current.scrollLeft;
+    }
+  };
+
+  const initEngine = async () => {
+    if (engineRef.current) return engineRef.current;
+
+    if (!(navigator as NavigatorWithGpu).gpu) {
+      throw new Error("WebGPU is not supported or enabled in this browser. Please use Chrome, Edge, or a WebGPU-enabled browser.");
+    }
+
+    setAiState(prev => ({ ...prev, status: 'loading', progress: 0, errorMsg: undefined }));
+
+    const worker = new Worker(
+      new URL('../workers/webllm.worker.ts', import.meta.url),
+      { type: 'module' }
+    );
+    workerRef.current = worker;
+
+    const { CreateWebWorkerMLCEngine } = await import('@mlc-ai/web-llm');
+    const modelId = "Qwen2.5-0.5B-Instruct-q4f16_1-MLC";
+
+    const engine = await CreateWebWorkerMLCEngine(
+      worker,
+      modelId,
+      {
+        initProgressCallback: (report: InitProgressReport) => {
+          const match = report.text.match(/([0-9.]+)%/);
+          let pct = 0;
+          if (match) {
+            pct = Math.round(parseFloat(match[1]));
+          } else if (report.text.toLowerCase().includes("finish loading")) {
+            pct = 100;
+          }
+          setAiState(prev => ({
+            ...prev,
+            progress: pct > 0 ? pct : prev.progress,
+            output: report.text,
+          }));
+        }
+      }
+    );
+    engineRef.current = engine;
+    return engine;
+  };
+
+  const handleGenerateRewrite = async (suggestionId: string, occurrenceText: string, category: string) => {
+    setAiState({
+      status: 'loading',
+      progress: 0,
+      output: 'Initializing WebGPU and loading local AI model...',
+      activeSuggestionId: suggestionId,
+    });
+
+    try {
+      const engine = await initEngine();
+      
+      setAiState(prev => ({
+        ...prev,
+        status: 'generating',
+        output: '',
+      }));
+
+      const systemPrompt = "You are an expert copywriter and editor. Your job is to rewrite the text provided by the user to improve its style, readability, and impact.";
+      let userPrompt = "";
+
+      if (category === 'sentence') {
+        userPrompt = `Rewrite the following long sentence to be shorter, clearer, and more readable. If appropriate, split it into two sentences. Do NOT include any explanations, introduction, or conversational text. Return ONLY the rewritten text:\n\n"${occurrenceText}"`;
+      } else if (category === 'style') {
+        userPrompt = `Rewrite the following text to use active voice, making it direct, punchy, and engaging. Do NOT include any explanations, introduction, or conversational text. Return ONLY the rewritten text:\n\n"${occurrenceText}"`;
+      } else {
+        userPrompt = `Rewrite the following text to improve flow, remove repetition or bloated words, and enhance style. Do NOT include any explanations, introduction, or conversational text. Return ONLY the rewritten text:\n\n"${occurrenceText}"`;
+      }
+
+      const messages: ChatCompletionMessageParam[] = [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userPrompt }
+      ];
+
+      const chunks = await engine.chat.completions.create({
+        messages,
+        stream: true,
+      });
+
+      let fullText = "";
+      for await (const chunk of chunks) {
+        const delta = chunk.choices[0]?.delta.content || "";
+        fullText += delta;
+        setAiState(prev => ({
+          ...prev,
+          status: 'generating',
+          output: fullText,
+        }));
+      }
+
+      // If the model wrapped the output in quotes, strip them
+      if (fullText.startsWith('"') && fullText.endsWith('"')) {
+        fullText = fullText.slice(1, -1);
+      }
+
+      setAiState(prev => ({
+        ...prev,
+        status: 'idle',
+        output: fullText,
+      }));
+
+    } catch (err: unknown) {
+      const error = err instanceof Error ? err : new Error(String(err));
+      console.error("AI Rewrite failed:", error);
+      setAiState(prev => ({
+        ...prev,
+        status: 'error',
+        errorMsg: error.message || "An error occurred during AI rewrite generation.",
+      }));
+    }
+  };
+
+  const handleApplyRewrite = (occurrenceText: string, rewrittenText: string) => {
+    if (!text) return;
+
+    let searchStr = occurrenceText.trim();
+    searchStr = searchStr.replace(/^Phrase:\s*"/, '').replace(/"$/, '');
+    searchStr = searchStr.replace(/^"/, '').replace(/"$/, '');
+
+    const index = text.toLowerCase().indexOf(searchStr.toLowerCase());
+    if (index !== -1) {
+      const before = text.substring(0, index);
+      const after = text.substring(index + searchStr.length);
+      const newText = before + rewrittenText.trim() + after;
+      setText(newText);
+      runAnalysis(newText);
+
+      setAiState({
+        status: 'idle',
+        progress: 0,
+        output: '',
+      });
+    } else {
+      alert("Could not find the original text in the editor to replace. It may have been edited.");
+    }
+  };
+
+  const handleCancelRewrite = () => {
+    setAiState({
+      status: 'idle',
+      progress: 0,
+      output: '',
+    });
+  };
+
+  // Helper to slice text into highlighted and plain segments
+  interface HighlightSegment {
+    text: string;
+    isLongSentence: boolean;
+    isPassive: boolean;
+  }
+
+  const getHighlightSegments = (textStr: string, highlightsList: HighlightOccurrence[]): HighlightSegment[] => {
+    if (!textStr) return [];
+    if (highlightsList.length === 0) {
+      return [{ text: textStr, isLongSentence: false, isPassive: false }];
+    }
+
+    const boundariesSet = new Set<number>([0, textStr.length]);
+    highlightsList.forEach(h => {
+      boundariesSet.add(h.startIndex);
+      boundariesSet.add(h.endIndex);
+    });
+    const boundaries = Array.from(boundariesSet).sort((a, b) => a - b);
+
+    const segmentsList: HighlightSegment[] = [];
+    for (let i = 0; i < boundaries.length - 1; i++) {
+      const start = boundaries[i];
+      const end = boundaries[i + 1];
+      const segmentText = textStr.substring(start, end);
+
+      let isLongSentence = false;
+      let isPassive = false;
+
+      highlightsList.forEach(h => {
+        if (start >= h.startIndex && end <= h.endIndex) {
+          if (h.type === 'long-sentence') {
+            isLongSentence = true;
+          } else if (h.type === 'passive') {
+            isPassive = true;
+          }
+        }
+      });
+
+      segmentsList.push({
+        text: segmentText,
+        isLongSentence,
+        isPassive
+      });
+    }
+
+    return segmentsList;
+  };
+
+  const renderHighlightedText = () => {
+    if (!showHighlights || !text) {
+      return <span className="text-slate-100">{text}</span>;
+    }
+
+    const highlights = detectHighlights(text);
+    const segments = getHighlightSegments(text, highlights);
+
+    const trailingNode = text.endsWith('\n') ? <span key="trailing" className="text-transparent"> </span> : null;
+
+    const rendered = segments.map((seg, idx) => {
+      let classes = "text-transparent";
+      
+      if (seg.isLongSentence && seg.isPassive) {
+        classes += " bg-indigo-500/10 border-b-2 border-dashed border-rose-500/50";
+      } else if (seg.isLongSentence) {
+        classes += " bg-indigo-500/10 border-b border-dashed border-indigo-400/60";
+      } else if (seg.isPassive) {
+        classes += " bg-amber-500/15 border-b border-dashed border-amber-400/60";
+      }
+
+      return (
+        <span key={idx} className={classes} style={{ textDecoration: 'none' }}>
+          {seg.text}
+        </span>
+      );
+    });
+
+    return (
+      <>
+        {rendered}
+        {trailingNode}
+      </>
+    );
+  };
 
   const handleHighlight = (textToHighlight: string) => {
     if (!textareaRef.current || !text) return;
@@ -86,10 +348,11 @@ export default function Home() {
     setAnalysisTimeMs(Math.round(end - start));
   };
 
-  // Debounced auto-analysis on typing (disabled for huge files to maintain performance)
+  // Debounced auto-analysis for larger texts to maintain typing responsiveness
   useEffect(() => {
-    if (text.length > 35000) {
-      // Large file: require manual analysis to prevent UI stuttering
+    if (text.length <= 40000 || text.length > 150000) {
+      // Small/medium texts are updated synchronously in onChange.
+      // Huge texts (> 150k) require clicking the manual "Analyze Writing" button.
       return;
     }
 
@@ -97,7 +360,7 @@ export default function Home() {
       startTransition(() => {
         runAnalysis(text);
       });
-    }, 800);
+    }, 1000);
 
     return () => clearTimeout(timer);
   }, [text]);
@@ -116,6 +379,11 @@ export default function Home() {
     setScoring(null);
     setSuggestions([]);
     setAnalysisTimeMs(null);
+    setAiState({
+      status: 'idle',
+      progress: 0,
+      output: '',
+    });
   };
 
   // File Upload Handlers
@@ -186,7 +454,16 @@ export default function Home() {
       case 'patterns':
         return <PatternsTab patterns={patterns} />;
       case 'suggestions':
-        return <SuggestionsTab suggestions={suggestions} onHighlight={handleHighlight} />;
+        return (
+          <SuggestionsTab
+            suggestions={suggestions}
+            onHighlight={handleHighlight}
+            aiState={aiState}
+            onGenerateRewrite={handleGenerateRewrite}
+            onApplyRewrite={handleApplyRewrite}
+            onCancelRewrite={handleCancelRewrite}
+          />
+        );
       case 'visuals':
         return <VisualsTab stats={stats} patterns={patterns} />;
       case 'export':
@@ -203,13 +480,13 @@ export default function Home() {
   };
 
   return (
-    <div className="flex-grow flex flex-col min-h-screen relative overflow-hidden bg-[#070a13] text-slate-100">
+    <div className="grow flex flex-col min-h-screen relative overflow-hidden bg-[#070a13] text-slate-100">
       {/* Background Neon Gradients */}
-      <div className="absolute top-[-10%] left-[-10%] w-[45vw] h-[45vw] rounded-full opacity-20 blur-[120px] bg-gradient-to-br from-indigo-500 to-purple-600 pointer-events-none animate-glow" />
-      <div className="absolute bottom-[-10%] right-[-10%] w-[45vw] h-[45vw] rounded-full opacity-25 blur-[120px] bg-gradient-to-br from-indigo-600 to-cyan-500 pointer-events-none animate-glow" />
+      <div className="absolute top-[-10%] left-[-10%] w-[45vw] h-[45vw] rounded-full opacity-20 blur-[120px] bg-linear-to-br from-indigo-500 to-purple-600 pointer-events-none animate-glow" />
+      <div className="absolute bottom-[-10%] right-[-10%] w-[45vw] h-[45vw] rounded-full opacity-25 blur-[120px] bg-linear-to-br from-indigo-600 to-cyan-500 pointer-events-none animate-glow" />
 
       {/* Header Bar */}
-      <header className="glass-panel border-b border-white/5 py-4 px-6 flex justify-between items-center relative z-25 sticky top-0">
+      <header className="glass-panel border-b border-white/5 py-4 px-6 flex justify-between items-center z-25 sticky top-0">
         <div className="flex items-center gap-3">
           <div className="relative w-8 h-8 rounded-lg overflow-hidden flex items-center justify-center bg-indigo-500/10 border border-indigo-500/20">
             <Image
@@ -222,7 +499,7 @@ export default function Home() {
             />
           </div>
           <div>
-            <h1 className="text-lg font-black tracking-wider bg-gradient-to-r from-indigo-300 via-violet-300 to-purple-400 bg-clip-text text-transparent flex items-center gap-1.5">
+            <h1 className="text-lg font-black tracking-wider bg-linear-to-r from-indigo-300 via-violet-300 to-purple-400 bg-clip-text text-transparent flex items-center gap-1.5">
               ScripLens <span className="text-[10px] font-bold text-indigo-400 bg-indigo-500/10 px-1.5 py-0.5 rounded-full border border-indigo-500/20 uppercase tracking-widest">v1 MVP</span>
             </h1>
           </div>
@@ -236,7 +513,7 @@ export default function Home() {
       </header>
 
       {/* Dashboard Main Workspace Grid */}
-      <main className="flex-grow grid grid-cols-1 lg:grid-cols-12 gap-6 p-6 relative z-10 max-w-7xl mx-auto w-full">
+      <main className="grow grid grid-cols-1 lg:grid-cols-12 gap-6 p-6 relative z-10 max-w-7xl mx-auto w-full">
         {/* Left Side: Editor (5 columns) */}
         <div className="lg:col-span-5 flex flex-col gap-4 h-full min-h-[500px]">
           {/* Label Bar */}
@@ -246,10 +523,20 @@ export default function Home() {
             </h2>
             <div className="flex items-center gap-2">
               <button
+                onClick={() => setShowHighlights(!showHighlights)}
+                className={`text-[10px] font-bold px-2.5 py-1 rounded border transition flex items-center gap-1 cursor-pointer select-none ${
+                  showHighlights
+                    ? 'text-indigo-400 bg-indigo-500/10 border-indigo-500/20 hover:bg-indigo-500/20'
+                    : 'text-slate-400 bg-slate-800/40 border-slate-700/25 hover:bg-slate-800/80'
+                }`}
+              >
+                <Sparkles className="w-3 h-3 text-indigo-400" /> Highlights: {showHighlights ? 'ON' : 'OFF'}
+              </button>
+              <button
                 onClick={loadSample}
                 className="text-[10px] font-bold text-indigo-400 hover:text-indigo-300 bg-indigo-500/5 hover:bg-indigo-500/10 px-2.5 py-1 rounded border border-indigo-500/10 hover:border-indigo-500/20 transition flex items-center gap-1"
               >
-                <Sparkles className="w-3 h-3" /> Load Sample
+                <Sparkles className="w-3 h-3 animate-pulse" /> Load Sample
               </button>
               <button
                 onClick={clearText}
@@ -262,7 +549,7 @@ export default function Home() {
 
           {/* Text Editor Box */}
           <div
-            className={`flex-grow glass-panel rounded-2xl p-4 flex flex-col relative transition-all duration-300 ${
+            className={`grow glass-panel rounded-2xl p-4 flex flex-col relative transition-all duration-300 ${
               dragActive ? 'border-indigo-500 ring-2 ring-indigo-500/20 bg-indigo-500/5' : ''
             }`}
             onDragEnter={handleDrag}
@@ -279,15 +566,52 @@ export default function Home() {
               </div>
             )}
 
-            {/* Rich Editor Textarea */}
-            <textarea
-              ref={textareaRef}
-              value={text}
-              onChange={(e) => setText(e.target.value)}
-              placeholder="Paste your writing here to analyze. Alternatively, drag and drop a .txt file, or click 'Load Sample' to test."
-              className="flex-grow w-full bg-transparent resize-none outline-none border-0 text-slate-100 placeholder-slate-500 text-sm leading-relaxed pr-2"
-              maxLength={250000}
-            />
+            {/* Synced Backdrop and Opaque Textarea Container */}
+            <div className="relative grow w-full min-h-0">
+              {/* Highlights Backdrop */}
+              <div
+                ref={backdropRef}
+                className="absolute inset-0 w-full h-full pointer-events-none select-none overflow-y-auto whitespace-pre-wrap wrap-break-word text-transparent font-sans text-sm leading-relaxed pr-2 scrollbar-none"
+                style={{
+                  fontFamily: 'inherit',
+                  fontSize: 'inherit',
+                  lineHeight: 'inherit',
+                  padding: '4px',
+                  margin: 0,
+                  border: 'none',
+                  whiteSpace: 'pre-wrap',
+                  wordWrap: 'break-word',
+                  boxSizing: 'border-box',
+                }}
+              >
+                {renderHighlightedText()}
+              </div>
+
+              {/* Rich Editor Textarea */}
+              <textarea
+                ref={textareaRef}
+                value={text}
+                onScroll={handleScroll}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  setText(val);
+                  if (val.length <= 40000) {
+                    runAnalysis(val);
+                  }
+                }}
+                placeholder="Paste your writing here to analyze. Alternatively, drag and drop a .txt file, or click 'Load Sample' to test."
+                className="absolute inset-0 w-full h-full bg-transparent resize-none outline-none border-0 text-slate-100 placeholder-slate-500 text-sm leading-relaxed pr-2 overflow-y-auto"
+                style={{
+                  fontFamily: 'inherit',
+                  fontSize: 'inherit',
+                  lineHeight: 'inherit',
+                  padding: '4px',
+                  margin: 0,
+                  boxSizing: 'border-box',
+                }}
+                maxLength={250000}
+              />
+            </div>
 
             {/* Live Count Pill Badges */}
             <div className="flex flex-wrap gap-2 mt-4 pt-3 border-t border-slate-900/60 text-[10px] font-bold text-slate-400 select-none">
@@ -356,7 +680,7 @@ export default function Home() {
           <div className="flex overflow-x-auto bg-slate-900/80 p-1 rounded-xl border border-slate-850 sticky top-16 z-20">
             <button
               onClick={() => setActiveTab('overview')}
-              className={`flex-grow px-3 py-2 text-xs font-bold rounded-lg transition whitespace-nowrap ${
+              className={`grow px-3 py-2 text-xs font-bold rounded-lg transition whitespace-nowrap ${
                 activeTab === 'overview'
                   ? 'bg-indigo-600 text-white shadow-md'
                   : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
@@ -366,7 +690,7 @@ export default function Home() {
             </button>
             <button
               onClick={() => setActiveTab('patterns')}
-              className={`flex-grow px-3 py-2 text-xs font-bold rounded-lg transition whitespace-nowrap flex items-center justify-center gap-1.5 ${
+              className={`grow px-3 py-2 text-xs font-bold rounded-lg transition whitespace-nowrap flex items-center justify-center gap-1.5 ${
                 activeTab === 'patterns'
                   ? 'bg-indigo-600 text-white shadow-md'
                   : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
@@ -376,7 +700,7 @@ export default function Home() {
             </button>
             <button
               onClick={() => setActiveTab('suggestions')}
-              className={`flex-grow px-3 py-2 text-xs font-bold rounded-lg transition whitespace-nowrap flex items-center justify-center gap-1.5 ${
+              className={`grow px-3 py-2 text-xs font-bold rounded-lg transition whitespace-nowrap flex items-center justify-center gap-1.5 ${
                 activeTab === 'suggestions'
                   ? 'bg-indigo-600 text-white shadow-md'
                   : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
@@ -393,7 +717,7 @@ export default function Home() {
             </button>
             <button
               onClick={() => setActiveTab('visuals')}
-              className={`flex-grow px-3 py-2 text-xs font-bold rounded-lg transition whitespace-nowrap ${
+              className={`grow px-3 py-2 text-xs font-bold rounded-lg transition whitespace-nowrap ${
                 activeTab === 'visuals'
                   ? 'bg-indigo-600 text-white shadow-md'
                   : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
@@ -403,7 +727,7 @@ export default function Home() {
             </button>
             <button
               onClick={() => setActiveTab('export')}
-              className={`flex-grow px-3 py-2 text-xs font-bold rounded-lg transition whitespace-nowrap flex items-center justify-center gap-1.5 ${
+              className={`grow px-3 py-2 text-xs font-bold rounded-lg transition whitespace-nowrap flex items-center justify-center gap-1.5 ${
                 activeTab === 'export'
                   ? 'bg-indigo-600 text-white shadow-md'
                   : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
@@ -414,7 +738,7 @@ export default function Home() {
           </div>
 
           {/* Active Tab Panel glass wrapper */}
-          <div className="flex-grow glass-panel rounded-2xl p-6 overflow-y-auto max-h-[calc(100vh-210px)] min-h-[420px]">
+          <div className="grow glass-panel rounded-2xl p-6 overflow-y-auto max-h-[calc(100vh-210px)] min-h-[420px]">
             {renderTabContent()}
           </div>
         </div>

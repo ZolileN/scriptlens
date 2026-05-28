@@ -14,7 +14,57 @@ export interface Suggestion {
 
 // Regex for common passive voice structures in English
 // matches a form of "to be" followed by a word ending in "ed" or common irregular past participles
-const PASSIVE_VOICE_REGEX = /\b(am|is|are|was|were|be|been|being)\b\s+(\w+ed|written|taken|seen|done|known|built|chosen|given|shown|told|held|brought|kept|begun|broken|driven|eaten|fallen|forgotten|frozen|grown|hurt|lost|made|paid|run|sent|spoken|spent|understood|won)\b/gi;
+export const PASSIVE_VOICE_REGEX = /\b(am|is|are|was|were|be|been|being)\b\s+(\w+ed|written|taken|seen|done|known|built|chosen|given|shown|told|held|brought|kept|begun|broken|driven|eaten|fallen|forgotten|frozen|grown|hurt|lost|made|paid|run|sent|spoken|spent|understood|won)\b/gi;
+
+export interface HighlightOccurrence {
+  text: string;
+  type: 'passive' | 'long-sentence';
+  startIndex: number;
+  endIndex: number;
+}
+
+export function detectHighlights(text: string): HighlightOccurrence[] {
+  if (!text || text.trim() === '') return [];
+  const sentences = splitSentences(text);
+  const occurrences: HighlightOccurrence[] = [];
+  let currentSearchIndex = 0;
+
+  sentences.forEach((sentence) => {
+    // Find sentence in text starting from currentSearchIndex to handle duplicate sentences correctly
+    const startIdx = text.toLowerCase().indexOf(sentence.toLowerCase(), currentSearchIndex);
+    if (startIdx !== -1) {
+      const endIdx = startIdx + sentence.length;
+      currentSearchIndex = endIdx; // advance search cursor
+
+      const words = sentence.match(/[a-zA-Z0-9']+/g) || [];
+      if (words.length >= 30) {
+        occurrences.push({
+          text: sentence,
+          type: 'long-sentence',
+          startIndex: startIdx,
+          endIndex: endIdx,
+        });
+      }
+
+      // Check for passive voice
+      PASSIVE_VOICE_REGEX.lastIndex = 0;
+      let match;
+      while ((match = PASSIVE_VOICE_REGEX.exec(sentence)) !== null) {
+        const matchText = match[0];
+        const matchStart = startIdx + match.index;
+        const matchEnd = matchStart + matchText.length;
+        occurrences.push({
+          text: matchText,
+          type: 'passive',
+          startIndex: matchStart,
+          endIndex: matchEnd,
+        });
+      }
+    }
+  });
+
+  return occurrences;
+}
 
 export function generateSuggestions(
   text: string,
@@ -36,7 +86,7 @@ export function generateSuggestions(
 
   sentencesText.forEach((s: string) => {
     const words = s.match(/[a-zA-Z0-9']+/g) || [];
-    if (words.length > 32) {
+    if (words.length >= 30) {
       longSentences.push(s);
       
       // Attempt Conjunction Slicing with compromise
@@ -69,7 +119,7 @@ export function generateSuggestions(
       category: 'sentence',
       severity: longSentences.length > 3 ? 'critical' : 'warning',
       title: 'Break Down Long Sentences',
-      explanation: `You have ${longSentences.length} sentence(s) that are longer than 32 words. Readers find long sentences difficult to digest.`,
+      explanation: `You have ${longSentences.length} sentence(s) that are 30+ words long. Readers find long sentences difficult to digest.`,
       suggestedFix: bestFix,
       occurrences: longSentences.slice(0, 5), // Show up to 5 examples
     });
