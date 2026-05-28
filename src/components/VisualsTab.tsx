@@ -14,7 +14,7 @@ import {
 import { Bar } from 'react-chartjs-2';
 import { TextStatistics } from '../lib/analysis/statistics';
 import { PatternAnalysis } from '../lib/analysis/patterns';
-import { BarChart, HelpCircle, Activity } from 'lucide-react';
+import { BarChart, Activity } from 'lucide-react';
 
 // Register ChartJS modules
 ChartJS.register(
@@ -180,7 +180,7 @@ export default function VisualsTab({ stats, patterns }: VisualsTabProps) {
 
         {/* Gradient Readability Bar */}
         <div className="relative mt-5 mb-8">
-          <div className="h-4 w-full rounded-full bg-gradient-to-r from-rose-500 via-amber-500 via-cyan-500 to-emerald-500" />
+          <div className="h-4 w-full rounded-full bg-linear-to-r from-rose-500 via-amber-500 to-emerald-500" />
 
           {/* Marker Pin */}
           <div
@@ -223,7 +223,7 @@ export default function VisualsTab({ stats, patterns }: VisualsTabProps) {
           <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-4 flex items-center gap-1.5">
             <BarChart className="w-4 h-4 text-indigo-400" /> Sentence Length Distribution
           </h4>
-          <div className="flex-grow relative">
+          <div className="grow relative">
             {stats.sentenceCount === 0 ? (
               <p className="text-xs text-slate-500 flex items-center justify-center h-full">Enter text to view sentence metrics</p>
             ) : (
@@ -237,7 +237,7 @@ export default function VisualsTab({ stats, patterns }: VisualsTabProps) {
           <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-4 flex items-center gap-1.5">
             <BarChart className="w-4 h-4 text-purple-400" /> Top Word Frequency
           </h4>
-          <div className="flex-grow relative">
+          <div className="grow relative">
             {patterns.repeatedWords.length === 0 ? (
               <p className="text-xs text-slate-500 flex items-center justify-center h-full">No word repetitions found</p>
             ) : (
