@@ -85,11 +85,27 @@ export default function Home() {
   const initEngine = async () => {
     if (engineRef.current) return engineRef.current;
 
-    if (!(navigator as NavigatorWithGpu).gpu) {
+    const gpu = (navigator as NavigatorWithGpu).gpu;
+    if (!gpu) {
       throw new Error("WebGPU is not supported or enabled in this browser. Please use Chrome, Edge, or a WebGPU-enabled browser.");
     }
 
     setAiState(prev => ({ ...prev, status: 'loading', progress: 0, errorMsg: undefined }));
+
+    // Check if shader-f16 is supported to determine if we should fall back to float32
+    let hasShaderF16 = false;
+    try {
+      const adapter = await gpu.requestAdapter?.() as { features?: { has: (feature: string) => boolean } } | null;
+      if (adapter?.features) {
+        hasShaderF16 = adapter.features.has("shader-f16");
+      }
+    } catch (e) {
+      console.warn("Failed to check WebGPU shader-f16 support, falling back to q4f32_1:", e);
+    }
+
+    const modelId = hasShaderF16
+      ? "Qwen2.5-0.5B-Instruct-q4f16_1-MLC"
+      : "Qwen2.5-0.5B-Instruct-q4f32_1-MLC";
 
     const worker = new Worker(
       new URL('../workers/webllm.worker.ts', import.meta.url),
@@ -98,7 +114,6 @@ export default function Home() {
     workerRef.current = worker;
 
     const { CreateWebWorkerMLCEngine } = await import('@mlc-ai/web-llm');
-    const modelId = "Qwen2.5-0.5B-Instruct-q4f16_1-MLC";
 
     const engine = await CreateWebWorkerMLCEngine(
       worker,
