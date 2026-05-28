@@ -38,6 +38,40 @@ export default function SuggestionsTab({
 }: SuggestionsTabProps) {
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
   const [filter, setFilter] = useState<'all' | 'critical' | 'warning' | 'info'>('all');
+  const [selectedOccurrenceId, setSelectedOccurrenceId] = useState<string | null>(null);
+
+  const getSelectedOccurrenceStyles = (severity: 'critical' | 'warning' | 'info') => {
+    switch (severity) {
+      case 'critical':
+        return {
+          container: 'border-rose-500/85 bg-rose-950/20 ring-1 ring-rose-500/35 shadow-[0_0_22px_-3px_rgba(244,63,94,0.35)] scale-[1.02] z-10',
+          badge: 'bg-rose-500/25 text-rose-300 border border-rose-500/40',
+        };
+      case 'warning':
+        return {
+          container: 'border-amber-500/85 bg-amber-950/20 ring-1 ring-amber-500/35 shadow-[0_0_22px_-3px_rgba(245,158,11,0.35)] scale-[1.02] z-10',
+          badge: 'bg-amber-500/25 text-amber-300 border border-amber-500/40',
+        };
+      case 'info':
+        return {
+          container: 'border-cyan-500/85 bg-cyan-950/20 ring-1 ring-cyan-500/35 shadow-[0_0_22px_-3px_rgba(6,182,212,0.35)] scale-[1.02] z-10',
+          badge: 'bg-cyan-500/25 text-cyan-300 border border-cyan-500/40',
+        };
+    }
+  };
+
+  const handleOccurrenceClick = (e: React.MouseEvent<HTMLDivElement>, occurrenceId: string, occ: string) => {
+    const target = e.target as HTMLElement;
+    if (target.closest('button') || target.closest('input')) {
+      return;
+    }
+    setSelectedOccurrenceId(occurrenceId);
+    if (onHighlight) {
+      onHighlight(occ);
+    }
+    e.currentTarget.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  };
+
 
   const toggleExpand = (id: string) => {
     const newExpanded = new Set(expandedIds);
@@ -204,31 +238,60 @@ export default function SuggestionsTab({
                     {/* Triggering phrases / sentences */}
                     {sug.occurrences.length > 0 && (
                       <div>
-                        <h5 className="font-semibold text-slate-400 uppercase tracking-wider text-[10px] mb-1.5">
-                          Detected Instances ({sug.occurrences.length})
+                        <h5 className="font-semibold text-slate-400 uppercase tracking-wider text-[10px] mb-1.5 flex justify-between items-center">
+                          <span>Detected Instances ({sug.occurrences.length})</span>
+                          {selectedOccurrenceId && selectedOccurrenceId.startsWith(sug.id) && (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setSelectedOccurrenceId(null);
+                              }}
+                              className="text-[9px] text-indigo-400 hover:text-indigo-300 font-bold lowercase hover:underline bg-transparent border-0 cursor-pointer"
+                            >
+                              Clear Highlight
+                            </button>
+                          )}
                         </h5>
-                        <div className="space-y-1.5 max-h-[150px] overflow-y-auto pr-1">
+                        <div
+                          className={`transition-all duration-305 overflow-y-auto pr-1 ${
+                            selectedOccurrenceId && selectedOccurrenceId.startsWith(sug.id)
+                              ? 'max-h-[260px] space-y-3'
+                              : 'max-h-[155px] space-y-1.5'
+                          }`}
+                        >
                           {sug.occurrences.map((occ, idx) => {
                             const occurrenceId = `${sug.id}-${idx}`;
+                            const isSelected = selectedOccurrenceId === occurrenceId || aiState?.activeSuggestionId === occurrenceId;
                             const isCurrentAi = aiState?.activeSuggestionId === occurrenceId;
+                            const selectedStyles = getSelectedOccurrenceStyles(sug.severity);
                             
                             return (
-                              <div key={idx} className="p-3 bg-slate-900/60 border border-slate-850 rounded flex flex-col gap-2">
+                              <div
+                                key={idx}
+                                onClick={(e) => handleOccurrenceClick(e, occurrenceId, occ)}
+                                className={`p-3 rounded-lg border transition-all duration-300 flex flex-col gap-2.5 relative select-text ${
+                                  isSelected
+                                    ? selectedStyles.container
+                                    : 'bg-slate-900/60 border-slate-850 hover:bg-slate-900/90 hover:border-slate-700 cursor-pointer'
+                                }`}
+                              >
                                 <div
-                                  onClick={() => onHighlight && onHighlight(occ)}
-                                  className={`font-mono text-[10px] text-slate-350 whitespace-pre-wrap leading-normal ${onHighlight ? 'cursor-pointer hover:text-indigo-400 transition' : ''}`}
-                                  title={onHighlight ? "Click to highlight in editor" : undefined}
+                                  className={`font-mono whitespace-pre-wrap leading-relaxed transition-all duration-300 ${
+                                    isSelected
+                                      ? 'text-xs text-slate-100 font-semibold'
+                                      : 'font-normal text-[10px] text-slate-350 hover:text-indigo-300'
+                                  }`}
                                 >
                                   {occ}
                                 </div>
                                 
                                 {/* AI Rewrite UI for this specific occurrence */}
                                 {isCurrentAi && aiState ? (
-                                  <div className="mt-2 pt-2 border-t border-slate-800/80 space-y-2">
+                                  <div className="mt-1 pt-2 border-t border-slate-800/80 space-y-2.5">
                                     {aiState.status === 'loading' && (
                                       <div className="space-y-1">
                                         <div className="flex justify-between text-[9px] text-slate-400">
-                                          <span className="flex items-center gap-1">
+                                          <span className="flex items-center gap-1 font-semibold">
                                             <RefreshCw className="w-3 h-3 animate-spin text-indigo-400" />
                                             Initializing Local AI Model...
                                           </span>
@@ -265,14 +328,20 @@ export default function SuggestionsTab({
                                         </div>
                                         <div className="flex gap-2 justify-end">
                                           <button
-                                            onClick={onCancelRewrite}
-                                            className="px-2.5 py-1 text-[9px] font-bold text-slate-400 hover:text-slate-200 bg-slate-850 hover:bg-slate-800 rounded border border-slate-750 transition"
+                                            onClick={(e) => {
+                                              e.stopPropagation();
+                                              onCancelRewrite && onCancelRewrite();
+                                            }}
+                                            className="px-3.5 py-1.5 text-xs font-bold text-slate-300 hover:text-white bg-slate-850 hover:bg-slate-800 rounded-lg border border-slate-750 transition duration-200 cursor-pointer select-none"
                                           >
                                             Discard
                                           </button>
                                           <button
-                                            onClick={() => onApplyRewrite && onApplyRewrite(occ, aiState.output)}
-                                            className="px-2.5 py-1 text-[9px] font-bold text-white bg-emerald-600 hover:bg-emerald-500 rounded border border-emerald-500 transition"
+                                            onClick={(e) => {
+                                              e.stopPropagation();
+                                              onApplyRewrite && onApplyRewrite(occ, aiState.output);
+                                            }}
+                                            className="px-3.5 py-1.5 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-500 rounded-lg border border-emerald-500 hover:border-emerald-450 hover:shadow-[0_0_12px_rgba(16,185,129,0.3)] transition duration-200 cursor-pointer select-none active:scale-95"
                                           >
                                             Apply Rewrite
                                           </button>
@@ -288,14 +357,20 @@ export default function SuggestionsTab({
                                         </div>
                                         <div className="flex gap-2 justify-end">
                                           <button
-                                            onClick={onCancelRewrite}
-                                            className="px-2.5 py-1 text-[9px] font-bold text-slate-400 hover:text-slate-200 bg-slate-850 hover:bg-slate-800 rounded border border-slate-750 transition"
+                                            onClick={(e) => {
+                                              e.stopPropagation();
+                                              onCancelRewrite && onCancelRewrite();
+                                            }}
+                                            className="px-3.5 py-1.5 text-xs font-bold text-slate-300 hover:text-white bg-slate-850 hover:bg-slate-800 rounded-lg border border-slate-750 transition duration-200 cursor-pointer select-none"
                                           >
                                             Dismiss
                                           </button>
                                           <button
-                                            onClick={() => onGenerateRewrite && onGenerateRewrite(occurrenceId, occ, sug.category)}
-                                            className="px-2.5 py-1 text-[9px] font-bold text-white bg-indigo-600 hover:bg-indigo-500 rounded border border-indigo-500 transition"
+                                            onClick={(e) => {
+                                              e.stopPropagation();
+                                              onGenerateRewrite && onGenerateRewrite(occurrenceId, occ, sug.category);
+                                            }}
+                                            className="px-3.5 py-1.5 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-500 rounded-lg border border-indigo-500 hover:border-indigo-400 transition duration-200 cursor-pointer select-none active:scale-95"
                                           >
                                             Retry
                                           </button>
@@ -304,16 +379,30 @@ export default function SuggestionsTab({
                                     )}
                                   </div>
                                 ) : (
-                                  <div className="flex justify-between items-center mt-1">
+                                  <div className="flex justify-between items-center mt-1 pt-1.5 border-t border-slate-850/50">
                                     <span className="text-[8px] text-slate-500">
-                                      {onHighlight ? "Click text to view in editor" : ""}
+                                      {isSelected ? (
+                                        <span className="flex items-center gap-1 text-[9px] px-1.5 py-0.5 rounded font-bold uppercase tracking-wider bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
+                                          <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-pulse" />
+                                          Active Highlight
+                                        </span>
+                                      ) : (
+                                        onHighlight ? "Click to highlight in editor" : ""
+                                      )}
                                     </span>
                                     <button
                                       disabled={aiState && aiState.status !== 'idle' && aiState.status !== 'error'}
-                                      onClick={() => onGenerateRewrite && onGenerateRewrite(occurrenceId, occ, sug.category)}
-                                      className="px-2.5 py-0.5 text-[9px] font-bold text-indigo-300 hover:text-white bg-indigo-500/10 hover:bg-indigo-600/80 disabled:opacity-50 disabled:cursor-not-allowed rounded border border-indigo-500/25 hover:border-indigo-400 transition flex items-center gap-1 select-none cursor-pointer"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        onGenerateRewrite && onGenerateRewrite(occurrenceId, occ, sug.category);
+                                      }}
+                                      className={`px-3 py-1.5 text-xs font-bold transition-all duration-200 rounded-lg border flex items-center gap-1.5 select-none cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed ${
+                                        isSelected
+                                          ? 'text-white bg-indigo-600 hover:bg-indigo-500 border-indigo-500 hover:border-indigo-400 shadow-md shadow-indigo-600/20 hover:shadow-indigo-500/30 active:scale-95'
+                                          : 'text-indigo-300 hover:text-white bg-indigo-500/10 hover:bg-indigo-600/80 border-indigo-500/25 hover:border-indigo-400'
+                                      }`}
                                     >
-                                      <Sparkles className="w-2.5 h-2.5" /> AI Rewrite
+                                      <Sparkles className="w-3 h-3" /> AI Rewrite
                                     </button>
                                   </div>
                                 )}
