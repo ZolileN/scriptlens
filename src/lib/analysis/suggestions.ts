@@ -92,7 +92,7 @@ export function generateSuggestions(
       
       if (passiveMatch.found) {
         const target = passiveMatch.match('^(#Noun|#Pronoun|#Determiner)+').text();
-        const verb = passiveMatch.match('#Participle').verbs().toPastTense().text();
+        const verb = (passiveMatch.match('#Participle') as unknown as { verbs(): { toPastTense(): { text(): string } } }).verbs().toPastTense().text();
         const agent = passiveMatch.match('by (#Noun|#Pronoun|#Determiner)+').not('by').text();
         
         if (target && verb && agent) {
