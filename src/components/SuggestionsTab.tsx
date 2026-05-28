@@ -26,6 +26,10 @@ interface SuggestionsTabProps {
   onGenerateRewrite?: (suggestionId: string, occurrenceText: string, category: string) => void;
   onApplyRewrite?: (occurrenceText: string, rewrittenText: string) => void;
   onCancelRewrite?: () => void;
+  isAiEnabled?: boolean;
+  engineLoaded?: boolean;
+  engineLoading?: boolean;
+  onToggleAi?: (enabled: boolean) => void;
 }
 
 export default function SuggestionsTab({
@@ -34,7 +38,11 @@ export default function SuggestionsTab({
   aiState,
   onGenerateRewrite,
   onApplyRewrite,
-  onCancelRewrite
+  onCancelRewrite,
+  isAiEnabled = false,
+  engineLoaded = false,
+  engineLoading = false,
+  onToggleAi
 }: SuggestionsTabProps) {
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
   const [filter, setFilter] = useState<'all' | 'critical' | 'warning' | 'info'>('all');
@@ -391,18 +399,41 @@ export default function SuggestionsTab({
                                       )}
                                     </span>
                                     <button
-                                      disabled={aiState && aiState.status !== 'idle' && aiState.status !== 'error'}
+                                      disabled={engineLoading || (aiState && aiState.status !== 'idle' && aiState.status !== 'error')}
                                       onClick={(e) => {
                                         e.stopPropagation();
-                                        onGenerateRewrite && onGenerateRewrite(occurrenceId, occ, sug.category);
+                                        if (!isAiEnabled) {
+                                          const confirmEnable = window.confirm(
+                                            "Offline AI Rewrite (Beta) is disabled.\n\nEnabling this will download a ~400MB model (Qwen-0.5B) to run entirely locally in your browser. Would you like to enable it?"
+                                          );
+                                          if (confirmEnable && onToggleAi) {
+                                            onToggleAi(true);
+                                          }
+                                        } else if (engineLoaded) {
+                                          onGenerateRewrite && onGenerateRewrite(occurrenceId, occ, sug.category);
+                                        }
                                       }}
                                       className={`px-3 py-1.5 text-xs font-bold transition-all duration-200 rounded-lg border flex items-center gap-1.5 select-none cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed ${
-                                        isSelected
-                                          ? 'text-white bg-indigo-600 hover:bg-indigo-500 border-indigo-500 hover:border-indigo-400 shadow-md shadow-indigo-600/20 hover:shadow-indigo-500/30 active:scale-95'
-                                          : 'text-indigo-300 hover:text-white bg-indigo-500/10 hover:bg-indigo-600/80 border-indigo-500/25 hover:border-indigo-400'
+                                        !isAiEnabled
+                                          ? 'text-slate-400 hover:text-slate-200 bg-slate-800/40 hover:bg-slate-800/80 border-slate-700/40 hover:border-slate-600/50'
+                                          : isSelected
+                                            ? 'text-white bg-indigo-600 hover:bg-indigo-500 border-indigo-500 hover:border-indigo-400 shadow-md shadow-indigo-600/20 hover:shadow-indigo-500/30 active:scale-95'
+                                            : 'text-indigo-300 hover:text-white bg-indigo-500/10 hover:bg-indigo-650/80 border-indigo-500/25 hover:border-indigo-400'
                                       }`}
                                     >
-                                      <Sparkles className="w-3 h-3" /> AI Rewrite
+                                      {engineLoading ? (
+                                        <>
+                                          <RefreshCw className="w-3 h-3 animate-spin text-slate-400" /> Loading model...
+                                        </>
+                                      ) : !isAiEnabled ? (
+                                        <>
+                                          <Sparkles className="w-3 h-3 text-slate-400" /> AI Rewrite (Offline)
+                                        </>
+                                      ) : (
+                                        <>
+                                          <Sparkles className="w-3 h-3" /> AI Rewrite
+                                        </>
+                                      )}
                                     </button>
                                   </div>
                                 )}

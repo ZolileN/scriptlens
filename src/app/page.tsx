@@ -72,6 +72,18 @@ export default function Home() {
     output: '',
   });
 
+  const [isAiEnabled, setIsAiEnabled] = useState(false);
+  const [engineLoaded, setEngineLoaded] = useState(false);
+  const [engineLoading, setEngineLoading] = useState(false);
+  const [webGpuSupported, setWebGpuSupported] = useState<boolean>(true);
+
+  useEffect(() => {
+    if (typeof navigator !== 'undefined') {
+      const gpu = (navigator as NavigatorWithGpu).gpu;
+      setWebGpuSupported(!!gpu);
+    }
+  }, []);
+
   const workerRef = useRef<Worker | null>(null);
   const engineRef = useRef<WebWorkerMLCEngine | null>(null);
 
@@ -79,6 +91,62 @@ export default function Home() {
     if (textareaRef.current && backdropRef.current) {
       backdropRef.current.scrollTop = textareaRef.current.scrollTop;
       backdropRef.current.scrollLeft = textareaRef.current.scrollLeft;
+    }
+  };
+
+  const handleToggleChange = async (checked: boolean) => {
+    if (checked) {
+      setIsAiEnabled(true);
+      setEngineLoading(true);
+      setAiState({
+        status: 'loading',
+        progress: 0,
+        output: 'Initializing WebGPU...',
+      });
+      try {
+        await initEngine();
+        setEngineLoaded(true);
+        setAiState(prev => ({
+          ...prev,
+          status: 'idle',
+          output: '',
+        }));
+      } catch (err: unknown) {
+        const error = err instanceof Error ? err : new Error(String(err));
+        console.error("AI Engine initialization failed:", error);
+        setIsAiEnabled(false);
+        setEngineLoaded(false);
+        setAiState(prev => ({
+          ...prev,
+          status: 'error',
+          errorMsg: error.message || "Failed to initialize the local AI model.",
+        }));
+      } finally {
+        setEngineLoading(false);
+      }
+    } else {
+      setIsAiEnabled(false);
+      setEngineLoaded(false);
+      setEngineLoading(false);
+      
+      // Clean up engine & worker to free WebGPU memory
+      if (engineRef.current) {
+        try {
+          await engineRef.current.unload();
+        } catch (e) {
+          console.warn("Error unloading engine:", e);
+        }
+        engineRef.current = null;
+      }
+      if (workerRef.current) {
+        workerRef.current.terminate();
+        workerRef.current = null;
+      }
+      setAiState({
+        status: 'idle',
+        progress: 0,
+        output: '',
+      });
     }
   };
 
@@ -341,6 +409,26 @@ export default function Home() {
       const endIndex = startIndex + searchStr.length;
       textareaRef.current.focus();
       textareaRef.current.setSelectionRange(startIndex, endIndex);
+
+      // Smooth scroll to selection:
+      // Count newlines before the selection start to approximate the line number
+      const textBefore = text.substring(0, startIndex);
+      const linesBefore = (textBefore.match(/\n/g) || []).length;
+      
+      // Fetch line-height styling of the textarea
+      const style = window.getComputedStyle(textareaRef.current);
+      const lineHeight = parseInt(style.lineHeight) || 20;
+      
+      // Center the highlighted line inside the textarea container
+      const targetScrollTop = Math.max(
+        0,
+        (linesBefore * lineHeight) - (textareaRef.current.clientHeight / 2) + (lineHeight / 2)
+      );
+
+      textareaRef.current.scrollTo({
+        top: targetScrollTop,
+        behavior: 'smooth'
+      });
     }
   };
 
@@ -477,6 +565,10 @@ export default function Home() {
             onGenerateRewrite={handleGenerateRewrite}
             onApplyRewrite={handleApplyRewrite}
             onCancelRewrite={handleCancelRewrite}
+            isAiEnabled={isAiEnabled}
+            engineLoaded={engineLoaded}
+            engineLoading={engineLoading}
+            onToggleAi={handleToggleChange}
           />
         );
       case 'visuals':
@@ -580,6 +672,77 @@ export default function Home() {
                 <span className="text-xs text-slate-500 mt-1">Accepts standard .txt documents</span>
               </div>
             )}
+
+            {/* Top Toolbar: Pro Toggle and Model status */}
+            <div className="flex flex-col gap-3 pb-3 mb-3 border-b border-slate-900/60 select-none">
+              <div className="flex items-center justify-between">
+                <div className="flex flex-col">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-extrabold text-slate-200 tracking-wide">Offline AI Rewrite</span>
+                    <span className="text-[9px] px-1.5 py-0.5 rounded font-black bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 uppercase tracking-wider animate-pulse">Beta</span>
+                  </div>
+                  <span className="text-[10px] text-slate-400 mt-0.5">
+                    Runs Qwen 0.5B locally via WebGPU. 100% private.
+                  </span>
+                </div>
+                
+                {/* Toggle switch */}
+                <div className="flex items-center gap-2">
+                  {!webGpuSupported ? (
+                    <span className="text-[9px] text-rose-400 font-semibold bg-rose-500/10 px-2.5 py-1 rounded border border-rose-500/20">
+                      WebGPU Not Supported
+                    </span>
+                  ) : (
+                    <>
+                      {engineLoaded && (
+                        <span className="text-[9px] text-emerald-400 font-bold bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20 flex items-center gap-1">
+                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                          Ready
+                        </span>
+                      )}
+                      <label className="relative inline-flex items-center cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={isAiEnabled}
+                          onChange={(e) => handleToggleChange(e.target.checked)}
+                          disabled={!webGpuSupported}
+                          className="sr-only peer"
+                        />
+                        <div className="w-9 h-5 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-slate-500 peer-checked:after:bg-indigo-400 after:border-slate-350 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-indigo-950/40 border border-slate-700/50 peer-checked:border-indigo-500/50 shadow-inner"></div>
+                      </label>
+                    </>
+                  )}
+                </div>
+              </div>
+              
+              {/* Progress bar (when active) */}
+              {isAiEnabled && !engineLoaded && (
+                <div className="p-3 bg-indigo-500/5 rounded-xl border border-indigo-500/10 space-y-2 mt-1">
+                  <div className="flex justify-between items-center text-[10px] text-indigo-300 font-bold">
+                    <span className="flex items-center gap-1.5">
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                      Securing local environment...
+                    </span>
+                    <span>{aiState.progress}%</span>
+                  </div>
+                  <div className="w-full bg-slate-900/80 h-2 rounded-full overflow-hidden border border-slate-800">
+                    <div
+                      className="bg-linear-to-r from-indigo-500 via-sky-400 to-cyan-400 h-full transition-all duration-300 shadow-[0_0_10px_rgba(99,102,241,0.5)]"
+                      style={{ width: `${aiState.progress}%` }}
+                    />
+                  </div>
+                  <div className="flex justify-between items-center text-[9px] text-slate-500 font-mono">
+                    <span className="truncate max-w-[80%]">{aiState.output || 'Waiting for WebGPU...'}</span>
+                    <button
+                      onClick={() => handleToggleChange(false)}
+                      className="text-[9px] text-rose-400 hover:text-rose-300 font-bold lowercase hover:underline bg-transparent border-0 cursor-pointer"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
 
             {/* Synced Backdrop and Opaque Textarea Container */}
             <div className="relative grow w-full min-h-0">
