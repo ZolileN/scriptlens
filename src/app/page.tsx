@@ -17,7 +17,7 @@ import type { WebWorkerMLCEngine, InitProgressReport, ChatCompletionMessageParam
 import { analyzeStatistics, TextStatistics } from '../lib/analysis/statistics';
 import { analyzePatterns, PatternAnalysis } from '../lib/analysis/patterns';
 import { calculateWritingScore, ScoringDetails } from '../lib/analysis/scoring';
-import { generateSuggestions, Suggestion, detectHighlights, HighlightOccurrence } from '../lib/analysis/suggestions';
+import { generateSuggestions, generateSuggestionsAsync, Suggestion, getHighlightsFromSuggestions, HighlightOccurrence } from '../lib/analysis/suggestions';
 
 interface NavigatorWithGpu extends Navigator {
   gpu?: {
@@ -52,6 +52,11 @@ export default function Home() {
   const [patterns, setPatterns] = useState<PatternAnalysis | null>(null);
   const [scoring, setScoring] = useState<ScoringDetails | null>(null);
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
+  const [tone, setTone] = useState<{ positivePercent: number; negativePercent: number; neutralPercent: number } | null>(null);
+  const [redactMode, setRedactMode] = useState(false);
+  const [originalText, setOriginalText] = useState('');
+  const [isAnalysisLoading, setIsAnalysisLoading] = useState(false);
+  const analysisSessionRef = useRef(0);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -318,6 +323,10 @@ export default function Home() {
     text: string;
     isLongSentence: boolean;
     isPassive: boolean;
+    isCritical: boolean;
+    isStyle: boolean;
+    isCompliance: boolean;
+    isTone: boolean;
     startIndex: number;
     endIndex: number;
   }
@@ -325,7 +334,17 @@ export default function Home() {
   const getHighlightSegments = (textStr: string, highlightsList: HighlightOccurrence[]): HighlightSegment[] => {
     if (!textStr) return [];
     if (highlightsList.length === 0) {
-      return [{ text: textStr, isLongSentence: false, isPassive: false, startIndex: 0, endIndex: textStr.length }];
+      return [{
+        text: textStr,
+        isLongSentence: false,
+        isPassive: false,
+        isCritical: false,
+        isStyle: false,
+        isCompliance: false,
+        isTone: false,
+        startIndex: 0,
+        endIndex: textStr.length
+      }];
     }
 
     const boundariesSet = new Set<number>([0, textStr.length]);
@@ -343,6 +362,10 @@ export default function Home() {
 
       let isLongSentence = false;
       let isPassive = false;
+      let isCritical = false;
+      let isStyle = false;
+      let isCompliance = false;
+      let isTone = false;
 
       highlightsList.forEach(h => {
         if (start >= h.startIndex && end <= h.endIndex) {
@@ -350,6 +373,14 @@ export default function Home() {
             isLongSentence = true;
           } else if (h.type === 'passive') {
             isPassive = true;
+          } else if (h.type === 'critical') {
+            isCritical = true;
+          } else if (h.type === 'style') {
+            isStyle = true;
+          } else if (h.type === 'compliance') {
+            isCompliance = true;
+          } else if (h.type === 'tone') {
+            isTone = true;
           }
         }
       });
@@ -358,6 +389,10 @@ export default function Home() {
         text: segmentText,
         isLongSentence,
         isPassive,
+        isCritical,
+        isStyle,
+        isCompliance,
+        isTone,
         startIndex: start,
         endIndex: end
       });
@@ -371,7 +406,7 @@ export default function Home() {
       return <span className="text-slate-100">{text}</span>;
     }
 
-    const highlights = detectHighlights(text);
+    const highlights = getHighlightsFromSuggestions(suggestions, text);
     const segments = getHighlightSegments(text, highlights);
 
     const trailingNode = text.endsWith('\n') ? <span key="trailing" className="text-transparent"> </span> : null;
@@ -379,12 +414,16 @@ export default function Home() {
     const rendered = segments.map((seg, idx) => {
       let classes = "text-transparent";
       
-      if (seg.isLongSentence && seg.isPassive) {
-        classes += " bg-indigo-500/10 border-b-2 border-dashed border-rose-500/50";
+      if (seg.isCritical) {
+        classes += " bg-rose-500/10 border-b border-dotted border-rose-500/70";
+      } else if (seg.isCompliance) {
+        classes += " bg-blue-500/5 border border-solid border-blue-400/50 rounded-xs";
+      } else if (seg.isStyle || seg.isPassive) {
+        classes += " bg-amber-500/15 border-b border-dashed border-amber-400/60";
+      } else if (seg.isTone) {
+        classes += " bg-violet-500/10 border-b border-dashed border-violet-400/60";
       } else if (seg.isLongSentence) {
         classes += " bg-indigo-500/10 border-b border-dashed border-indigo-400/60";
-      } else if (seg.isPassive) {
-        classes += " bg-amber-500/15 border-b border-dashed border-amber-400/60";
       }
 
       return (
@@ -417,7 +456,7 @@ export default function Home() {
     searchStr = searchStr.replace(/^"/, '').replace(/"\s*\(used \d+ times\)$/, '');
 
     // Get all parsed highlight occurrences to match the exact start and end index
-    const highlights = detectHighlights(text);
+    const highlights = getHighlightsFromSuggestions(suggestions, text);
     
     // Find the highlight that best matches the search text and category/type
     let startIndex = -1;
@@ -434,8 +473,20 @@ export default function Home() {
       // Try to match by type if category is provided
       let bestMatch = matchedHighlights[0];
       if (category) {
-        const expectedType = category === 'sentence' ? 'long-sentence' : 'passive';
-        const typeMatch = matchedHighlights.find(h => h.type === expectedType);
+        let expectedType: HighlightOccurrence['type'] = 'style';
+        if (category === 'sentence') {
+          expectedType = 'long-sentence';
+        } else if (category === 'style') {
+          expectedType = 'style';
+        } else if (category === 'spelling' || category === 'grammar') {
+          expectedType = 'critical';
+        } else if (category === 'compliance') {
+          expectedType = 'compliance';
+        } else if (category === 'rhythm') {
+          expectedType = 'tone';
+        }
+
+        const typeMatch = matchedHighlights.find(h => h.type === expectedType || (category === 'style' && h.type === 'passive'));
         if (typeMatch) {
           bestMatch = typeMatch;
         }
@@ -507,22 +558,42 @@ export default function Home() {
   };
 
   // Analyze function
-  const runAnalysis = (rawText: string) => {
+  const runAnalysis = async (rawText: string) => {
+    const sessionId = ++analysisSessionRef.current;
     const start = performance.now();
     
     // Compute metrics
     const computedStats = analyzeStatistics(rawText);
     const computedPatterns = analyzePatterns(rawText);
     const computedScoring = calculateWritingScore(rawText, computedStats, computedPatterns);
-    const computedSuggestions = generateSuggestions(rawText, computedStats, computedPatterns);
+    const syncSuggestions = generateSuggestions(rawText, computedStats, computedPatterns);
+
+    if (sessionId !== analysisSessionRef.current) return;
 
     setStats(computedStats);
     setPatterns(computedPatterns);
     setScoring(computedScoring);
-    setSuggestions(computedSuggestions);
+    setSuggestions(syncSuggestions);
 
-    const end = performance.now();
-    setAnalysisTimeMs(Math.round(end - start));
+    setIsAnalysisLoading(true);
+    try {
+      const result = await generateSuggestionsAsync(rawText, computedStats, computedPatterns);
+      
+      if (sessionId !== analysisSessionRef.current) return;
+      
+      setSuggestions(result.suggestions);
+      if (result.tone) {
+        setTone(result.tone);
+      }
+    } catch (err) {
+      console.error("Advanced analysis run failed:", err);
+    } finally {
+      if (sessionId === analysisSessionRef.current) {
+        setIsAnalysisLoading(false);
+        const end = performance.now();
+        setAnalysisTimeMs(Math.round(end - start));
+      }
+    }
   };
 
   // Debounced auto-analysis for larger texts to maintain typing responsiveness
@@ -627,7 +698,7 @@ export default function Home() {
 
     switch (activeTab) {
       case 'overview':
-        return <OverviewTab stats={stats} scoring={scoring} />;
+        return <OverviewTab stats={stats} scoring={scoring} tone={tone} />;
       case 'patterns':
         return <PatternsTab patterns={patterns} />;
       case 'suggestions':
@@ -704,6 +775,29 @@ export default function Home() {
             </h2>
             <div className="flex items-center gap-2">
               <button
+                onClick={async () => {
+                  if (!redactMode) {
+                    setOriginalText(text);
+                    const { anonymizeText } = await import('../lib/analysis/suggestions');
+                    const redacted = await anonymizeText(text);
+                    setText(redacted);
+                    setRedactMode(true);
+                    runAnalysis(redacted);
+                  } else {
+                    setText(originalText);
+                    setRedactMode(false);
+                    runAnalysis(originalText);
+                  }
+                }}
+                className={`text-[10px] font-bold px-2.5 py-1 rounded border transition flex items-center gap-1 cursor-pointer select-none ${
+                  redactMode
+                    ? 'text-rose-400 bg-rose-500/10 border-rose-500/20 hover:bg-rose-500/20'
+                    : 'text-slate-400 bg-slate-800/40 border-slate-700/25 hover:bg-slate-800/80'
+                }`}
+              >
+                <ShieldCheck className="w-3 h-3 text-rose-400" /> Redact Document: {redactMode ? 'ON' : 'OFF'}
+              </button>
+              <button
                 onClick={() => setShowHighlights(!showHighlights)}
                 className={`text-[10px] font-bold px-2.5 py-1 rounded border transition flex items-center gap-1 cursor-pointer select-none ${
                   showHighlights
@@ -714,13 +808,23 @@ export default function Home() {
                 <Sparkles className="w-3 h-3 text-indigo-400" /> Highlights: {showHighlights ? 'ON' : 'OFF'}
               </button>
               <button
-                onClick={loadSample}
+                onClick={() => {
+                  if (redactMode) {
+                    setRedactMode(false);
+                  }
+                  loadSample();
+                }}
                 className="text-[10px] font-bold text-indigo-400 hover:text-indigo-300 bg-indigo-500/5 hover:bg-indigo-500/10 px-2.5 py-1 rounded border border-indigo-500/10 hover:border-indigo-500/20 transition flex items-center gap-1"
               >
                 <Sparkles className="w-3 h-3 animate-pulse" /> Load Sample
               </button>
               <button
-                onClick={clearText}
+                onClick={() => {
+                  if (redactMode) {
+                    setRedactMode(false);
+                  }
+                  clearText();
+                }}
                 className="text-[10px] font-bold text-slate-400 hover:text-slate-200 bg-slate-800/40 hover:bg-slate-800/80 px-2.5 py-1 rounded border border-slate-700/20 transition flex items-center gap-1"
               >
                 <Eraser className="w-3 h-3" /> Clear
@@ -990,7 +1094,7 @@ export default function Home() {
           </div>
 
           {/* Active Tab Panel glass wrapper */}
-          <div className="grow glass-panel rounded-2xl p-6 overflow-y-auto max-h-[calc(100vh-210px)] min-h-[420px]">
+          <div className="grow glass-panel rounded-2xl p-6 overflow-y-auto max-h-[calc(100vh-170px)] min-h-[420px]">
             {renderTabContent()}
           </div>
         </div>

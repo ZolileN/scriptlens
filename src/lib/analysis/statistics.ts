@@ -10,6 +10,7 @@ export interface TextStatistics {
   lexicalDensity: number; // content words / total words
   fleschReadingEase: number;
   gunningFog: number;
+  fleschKincaidGrade: number;
   burstinessRaw: number; // Pop Std Dev
   burstinessNormalized: number; // Coeff of Variation (StdDev / Mean)
   sentenceDistribution: { length: number; count: number }[];
@@ -39,7 +40,7 @@ export function splitSentences(text: string): string[] {
   const abbreviations = /\b(mr|mrs|ms|dr|prof|sr|jr|gen|col|rep|sen|eg|ie|vs|jan|feb|mar|apr|jun|jul|aug|sep|oct|nov|dec)\./gi;
   
   // Temporarily mask abbreviation periods
-  let maskedText = text.replace(abbreviations, (match: string) => {
+  const maskedText = text.replace(abbreviations, (match: string) => {
     return match.replace('.', '___TEMP_DOT___');
   });
 
@@ -96,6 +97,7 @@ export function analyzeStatistics(text: string): TextStatistics {
       lexicalDensity: 0,
       fleschReadingEase: 100,
       gunningFog: 0,
+      fleschKincaidGrade: 0,
       burstinessRaw: 0,
       burstinessNormalized: 0,
       sentenceDistribution: [],
@@ -130,6 +132,7 @@ export function analyzeStatistics(text: string): TextStatistics {
       lexicalDensity: 0,
       fleschReadingEase: 100,
       gunningFog: 0,
+      fleschKincaidGrade: 0,
       burstinessRaw: 0,
       burstinessNormalized: 0,
       sentenceDistribution: [],
@@ -208,6 +211,10 @@ export function analyzeStatistics(text: string): TextStatistics {
   // Gunning Fog formula
   const gunningFog = 0.4 * (wordCount / sentenceCount + 100 * (complexWordsCount / wordCount));
 
+  // Flesch-Kincaid Grade Level formula
+  const fleschKincaidGrade =
+    0.39 * (wordCount / sentenceCount) + 11.8 * (totalSyllables / wordCount) - 15.59;
+
   return {
     characterCount,
     wordCount,
@@ -220,6 +227,7 @@ export function analyzeStatistics(text: string): TextStatistics {
     lexicalDensity: Math.min(Math.max(lexicalDensity, 0), 1),
     fleschReadingEase: Math.max(0, Math.min(120, fleschReadingEase)),
     gunningFog: Math.max(0, Math.min(25, gunningFog)),
+    fleschKincaidGrade: Math.max(0, Math.min(20, fleschKincaidGrade)),
     burstinessRaw,
     burstinessNormalized,
     sentenceDistribution,
