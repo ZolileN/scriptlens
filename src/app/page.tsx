@@ -80,7 +80,9 @@ export default function Home() {
   useEffect(() => {
     if (typeof navigator !== 'undefined') {
       const gpu = (navigator as NavigatorWithGpu).gpu;
-      setWebGpuSupported(!!gpu);
+      setTimeout(() => {
+        setWebGpuSupported(!!gpu);
+      }, 0);
     }
   }, []);
 
@@ -316,12 +318,14 @@ export default function Home() {
     text: string;
     isLongSentence: boolean;
     isPassive: boolean;
+    startIndex: number;
+    endIndex: number;
   }
 
   const getHighlightSegments = (textStr: string, highlightsList: HighlightOccurrence[]): HighlightSegment[] => {
     if (!textStr) return [];
     if (highlightsList.length === 0) {
-      return [{ text: textStr, isLongSentence: false, isPassive: false }];
+      return [{ text: textStr, isLongSentence: false, isPassive: false, startIndex: 0, endIndex: textStr.length }];
     }
 
     const boundariesSet = new Set<number>([0, textStr.length]);
@@ -353,7 +357,9 @@ export default function Home() {
       segmentsList.push({
         text: segmentText,
         isLongSentence,
-        isPassive
+        isPassive,
+        startIndex: start,
+        endIndex: end
       });
     }
 
@@ -382,7 +388,13 @@ export default function Home() {
       }
 
       return (
-        <span key={idx} className={classes} style={{ textDecoration: 'none' }}>
+        <span
+          key={idx}
+          data-start={seg.startIndex}
+          data-end={seg.endIndex}
+          className={classes}
+          style={{ textDecoration: 'none' }}
+        >
           {seg.text}
         </span>
       );
@@ -396,7 +408,7 @@ export default function Home() {
     );
   };
 
-  const handleHighlight = (textToHighlight: string) => {
+  const handleHighlight = (textToHighlight: string, category?: string) => {
     if (!textareaRef.current || !text) return;
 
     // Clean the search string from UI labels or trailing ellipses
@@ -404,31 +416,93 @@ export default function Home() {
     searchStr = searchStr.replace(/^Phrase:\s*"/, '').replace(/"\s*\(used \d+ times\)$/, '');
     searchStr = searchStr.replace(/^"/, '').replace(/"\s*\(used \d+ times\)$/, '');
 
-    const startIndex = text.toLowerCase().indexOf(searchStr.toLowerCase());
+    // Get all parsed highlight occurrences to match the exact start and end index
+    const highlights = detectHighlights(text);
+    
+    // Find the highlight that best matches the search text and category/type
+    let startIndex = -1;
+    let endIndex = -1;
+    
+    // Filter highlights that match the text
+    const matchedHighlights = highlights.filter(h => {
+      const cleanH = h.text.toLowerCase().trim();
+      const cleanSearch = searchStr.toLowerCase().trim();
+      return cleanH === cleanSearch || cleanH.includes(cleanSearch) || cleanSearch.includes(cleanH);
+    });
+
+    if (matchedHighlights.length > 0) {
+      // Try to match by type if category is provided
+      let bestMatch = matchedHighlights[0];
+      if (category) {
+        const expectedType = category === 'sentence' ? 'long-sentence' : 'passive';
+        const typeMatch = matchedHighlights.find(h => h.type === expectedType);
+        if (typeMatch) {
+          bestMatch = typeMatch;
+        }
+      }
+      startIndex = bestMatch.startIndex;
+      endIndex = bestMatch.endIndex;
+    } else {
+      // Fallback to simple indexOf lookup
+      startIndex = text.toLowerCase().indexOf(searchStr.toLowerCase());
+      if (startIndex !== -1) {
+        endIndex = startIndex + searchStr.length;
+      }
+    }
+
     if (startIndex !== -1) {
-      const endIndex = startIndex + searchStr.length;
       textareaRef.current.focus();
       textareaRef.current.setSelectionRange(startIndex, endIndex);
 
-      // Smooth scroll to selection:
-      // Count newlines before the selection start to approximate the line number
-      const textBefore = text.substring(0, startIndex);
-      const linesBefore = (textBefore.match(/\n/g) || []).length;
-      
-      // Fetch line-height styling of the textarea
-      const style = window.getComputedStyle(textareaRef.current);
-      const lineHeight = parseInt(style.lineHeight) || 20;
-      
-      // Center the highlighted line inside the textarea container
-      const targetScrollTop = Math.max(
-        0,
-        (linesBefore * lineHeight) - (textareaRef.current.clientHeight / 2) + (lineHeight / 2)
-      );
+      // Locate corresponding visual element in the backdrop container to handle text wrapping accurately
+      let targetScrollTop = 0;
+      let foundSpan = false;
+
+      if (backdropRef.current) {
+        const spans = backdropRef.current.querySelectorAll('span[data-start]');
+        for (let i = 0; i < spans.length; i++) {
+          const span = spans[i] as HTMLSpanElement;
+          const start = parseInt(span.getAttribute('data-start') || '0');
+          const end = parseInt(span.getAttribute('data-end') || '0');
+
+          // Check if this span contains or overlaps the selection start
+          if (start <= startIndex && end >= endIndex) {
+            const offsetTop = span.offsetTop;
+            const containerHeight = textareaRef.current.clientHeight;
+            const elementHeight = span.offsetHeight;
+
+            // Center the highlighted element in the editor viewport
+            targetScrollTop = Math.max(0, offsetTop - (containerHeight / 2) + (elementHeight / 2));
+            foundSpan = true;
+            break;
+          }
+        }
+      }
+
+      if (!foundSpan) {
+        // Fallback calculation using line numbers if backdrop span isn't found
+        const textBefore = text.substring(0, startIndex);
+        const linesBefore = (textBefore.match(/\n/g) || []).length;
+        const style = window.getComputedStyle(textareaRef.current);
+        const lineHeight = parseInt(style.lineHeight) || 20;
+        targetScrollTop = Math.max(
+          0,
+          (linesBefore * lineHeight) - (textareaRef.current.clientHeight / 2) + (lineHeight / 2)
+        );
+      }
 
       textareaRef.current.scrollTo({
         top: targetScrollTop,
         behavior: 'smooth'
       });
+
+      // Synchronize the backdrop scroll simultaneously to ensure zero-lag visual alignment
+      if (backdropRef.current) {
+        backdropRef.current.scrollTo({
+          top: targetScrollTop,
+          behavior: 'smooth'
+        });
+      }
     }
   };
 
