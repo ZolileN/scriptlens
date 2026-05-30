@@ -15,7 +15,7 @@ import { Suggestion } from '../lib/analysis/suggestions';
 
 interface SuggestionsTabProps {
   suggestions: Suggestion[];
-  onHighlight?: (text: string) => void;
+  onHighlight?: (text: string, category: string) => void;
   aiState?: {
     status: 'idle' | 'loading' | 'generating' | 'error';
     progress: number;
@@ -68,14 +68,14 @@ export default function SuggestionsTab({
     }
   };
 
-  const handleOccurrenceClick = (e: React.MouseEvent<HTMLDivElement>, occurrenceId: string, occ: string) => {
+  const handleOccurrenceClick = (e: React.MouseEvent<HTMLDivElement>, occurrenceId: string, occ: string, category: string) => {
     const target = e.target as HTMLElement;
     if (target.closest('button') || target.closest('input')) {
       return;
     }
     setSelectedOccurrenceId(occurrenceId);
     if (onHighlight) {
-      onHighlight(occ);
+      onHighlight(occ, category);
     }
     e.currentTarget.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   };
@@ -276,7 +276,7 @@ export default function SuggestionsTab({
                             return (
                               <div
                                 key={idx}
-                                onClick={(e) => handleOccurrenceClick(e, occurrenceId, occ)}
+                                onClick={(e) => handleOccurrenceClick(e, occurrenceId, occ, sug.category)}
                                 className={`p-3 rounded-lg border transition-all duration-300 flex flex-col gap-2.5 relative select-text ${
                                   isSelected
                                     ? selectedStyles.container
@@ -295,61 +295,61 @@ export default function SuggestionsTab({
                                 
                                 {/* AI Rewrite UI for this specific occurrence */}
                                 {isCurrentAi && aiState ? (
-                                  <div className="mt-1 pt-2 border-t border-slate-800/80 space-y-2.5">
+                                  <div className="mt-2 pt-3 border-t border-slate-800/80 space-y-3">
                                     {aiState.status === 'loading' && (
-                                      <div className="space-y-1">
-                                        <div className="flex justify-between text-[9px] text-slate-400">
-                                          <span className="flex items-center gap-1 font-semibold">
-                                            <RefreshCw className="w-3 h-3 animate-spin text-indigo-400" />
+                                      <div className="space-y-2">
+                                        <div className="flex justify-between text-xs text-slate-300">
+                                          <span className="flex items-center gap-1.5 font-bold">
+                                            <RefreshCw className="w-3.5 h-3.5 animate-spin text-indigo-400" />
                                             Initializing Local AI Model...
                                           </span>
-                                          <span className="font-bold">{aiState.progress}%</span>
+                                          <span className="font-extrabold text-indigo-300">{aiState.progress}%</span>
                                         </div>
-                                        <div className="w-full bg-slate-850 h-1.5 rounded-full overflow-hidden">
+                                        <div className="w-full bg-slate-850 h-2 rounded-full overflow-hidden border border-slate-800">
                                           <div
-                                            className="bg-indigo-500 h-full transition-all duration-300"
+                                            className="bg-linear-to-r from-indigo-500 via-indigo-400 to-sky-400 h-full transition-all duration-300 shadow-[0_0_8px_rgba(99,102,241,0.3)]"
                                             style={{ width: `${aiState.progress}%` }}
                                           />
                                         </div>
-                                        <div className="text-[8px] text-slate-500 font-mono truncate">
+                                        <div className="text-[10px] text-slate-400 font-mono truncate bg-slate-900/60 p-2 rounded-lg border border-slate-850/60">
                                           {aiState.output}
                                         </div>
                                       </div>
                                     )}
 
                                     {aiState.status === 'generating' && (
-                                      <div className="space-y-1.5">
-                                        <div className="text-[9px] text-indigo-400 font-bold flex items-center gap-1">
-                                          <RefreshCw className="w-3 h-3 animate-spin" /> AI is streaming rewrite...
+                                      <div className="space-y-2">
+                                        <div className="text-xs text-indigo-300 font-bold flex items-center gap-1.5 animate-pulse">
+                                          <RefreshCw className="w-3.5 h-3.5 animate-spin" /> AI is streaming rewrite...
                                         </div>
-                                        <div className="p-2 bg-indigo-950/20 border border-indigo-500/20 rounded text-[10px] text-slate-200 italic whitespace-pre-wrap leading-relaxed font-sans">
+                                        <div className="p-3.5 bg-indigo-950/30 border border-indigo-500/30 rounded-xl text-xs md:text-[13px] text-slate-100 font-medium italic whitespace-pre-wrap leading-relaxed shadow-[inset_0_1px_2px_rgba(0,0,0,0.4),0_0_15px_rgba(99,102,241,0.1)] font-sans">
                                           {aiState.output || "..."}
                                         </div>
                                       </div>
                                     )}
 
                                     {aiState.status === 'idle' && aiState.output && (
-                                      <div className="space-y-2">
-                                        <div className="text-[9px] text-emerald-400 font-bold">✓ AI Suggestion:</div>
-                                        <div className="p-2 bg-emerald-950/25 border border-emerald-500/20 rounded text-[10px] text-slate-250 font-sans leading-relaxed">
+                                      <div className="space-y-2.5">
+                                        <div className="text-xs text-emerald-400 font-bold flex items-center gap-1">✓ Local AI Rewrite Suggestion:</div>
+                                        <div className="p-3.5 bg-emerald-950/15 border border-emerald-500/30 rounded-xl text-xs md:text-[13px] text-slate-100 font-medium whitespace-pre-wrap leading-relaxed shadow-[inset_0_1px_2px_rgba(0,0,0,0.3),0_0_15px_rgba(16,185,129,0.1)] font-sans">
                                           {aiState.output}
                                         </div>
                                         <div className="flex gap-2 justify-end">
                                           <button
                                             onClick={(e) => {
                                               e.stopPropagation();
-                                              onCancelRewrite && onCancelRewrite();
+                                              if (onCancelRewrite) onCancelRewrite();
                                             }}
-                                            className="px-3.5 py-1.5 text-xs font-bold text-slate-300 hover:text-white bg-slate-850 hover:bg-slate-800 rounded-lg border border-slate-750 transition duration-200 cursor-pointer select-none"
+                                            className="px-4 py-2 text-xs font-bold text-slate-350 hover:text-white bg-slate-850 hover:bg-slate-800 rounded-lg border border-slate-700 transition duration-200 cursor-pointer shadow-md select-none"
                                           >
                                             Discard
                                           </button>
                                           <button
                                             onClick={(e) => {
                                               e.stopPropagation();
-                                              onApplyRewrite && onApplyRewrite(occ, aiState.output);
+                                              if (onApplyRewrite) onApplyRewrite(occ, aiState.output);
                                             }}
-                                            className="px-3.5 py-1.5 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-500 rounded-lg border border-emerald-500 hover:border-emerald-450 hover:shadow-[0_0_12px_rgba(16,185,129,0.3)] transition duration-200 cursor-pointer select-none active:scale-95"
+                                            className="px-4 py-2 text-xs font-extrabold text-white bg-emerald-600 hover:bg-emerald-500 rounded-lg border border-emerald-500 hover:border-emerald-450 hover:shadow-[0_0_15px_rgba(16,185,129,0.45)] transition duration-200 cursor-pointer select-none active:scale-95"
                                           >
                                             Apply Rewrite
                                           </button>
@@ -358,27 +358,27 @@ export default function SuggestionsTab({
                                     )}
 
                                     {aiState.status === 'error' && (
-                                      <div className="space-y-2">
-                                        <div className="text-[9px] text-rose-400 font-bold">⚠ AI Rewrite Error:</div>
-                                        <div className="text-[9px] text-rose-300 font-mono bg-rose-950/20 border border-rose-500/25 p-2 rounded leading-relaxed">
+                                      <div className="space-y-2.5">
+                                        <div className="text-xs text-rose-400 font-bold flex items-center gap-1">⚠ Local AI Rewrite Error:</div>
+                                        <div className="text-xs text-rose-300 font-mono bg-rose-950/20 border border-rose-500/25 p-3 rounded-xl leading-relaxed max-h-[120px] overflow-y-auto scrollbar-thin">
                                           {aiState.errorMsg || "WebGPU load failed. Make sure your browser supports WebGPU (e.g. Chrome/Edge)."}
                                         </div>
                                         <div className="flex gap-2 justify-end">
                                           <button
                                             onClick={(e) => {
                                               e.stopPropagation();
-                                              onCancelRewrite && onCancelRewrite();
+                                              if (onCancelRewrite) onCancelRewrite();
                                             }}
-                                            className="px-3.5 py-1.5 text-xs font-bold text-slate-300 hover:text-white bg-slate-850 hover:bg-slate-800 rounded-lg border border-slate-750 transition duration-200 cursor-pointer select-none"
+                                            className="px-4 py-2 text-xs font-bold text-slate-350 hover:text-white bg-slate-850 hover:bg-slate-800 rounded-lg border border-slate-750 transition duration-200 cursor-pointer shadow-md select-none"
                                           >
                                             Dismiss
                                           </button>
                                           <button
                                             onClick={(e) => {
                                               e.stopPropagation();
-                                              onGenerateRewrite && onGenerateRewrite(occurrenceId, occ, sug.category);
+                                              if (onGenerateRewrite) onGenerateRewrite(occurrenceId, occ, sug.category);
                                             }}
-                                            className="px-3.5 py-1.5 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-500 rounded-lg border border-indigo-500 hover:border-indigo-400 transition duration-200 cursor-pointer select-none active:scale-95"
+                                            className="px-4 py-2 text-xs font-extrabold text-white bg-indigo-600 hover:bg-indigo-500 rounded-lg border border-indigo-500 hover:border-indigo-400 transition duration-200 cursor-pointer select-none active:scale-95"
                                           >
                                             Retry
                                           </button>
@@ -410,7 +410,7 @@ export default function SuggestionsTab({
                                             onToggleAi(true);
                                           }
                                         } else if (engineLoaded) {
-                                          onGenerateRewrite && onGenerateRewrite(occurrenceId, occ, sug.category);
+                                          if (onGenerateRewrite) onGenerateRewrite(occurrenceId, occ, sug.category);
                                         }
                                       }}
                                       className={`px-3 py-1.5 text-xs font-bold transition-all duration-200 rounded-lg border flex items-center gap-1.5 select-none cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed ${

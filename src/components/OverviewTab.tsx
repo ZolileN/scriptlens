@@ -16,9 +16,10 @@ import { ScoringDetails } from '../lib/analysis/scoring';
 interface OverviewTabProps {
   stats: TextStatistics;
   scoring: ScoringDetails;
+  tone?: { positivePercent: number; negativePercent: number; neutralPercent: number } | null;
 }
 
-export default function OverviewTab({ stats, scoring }: OverviewTabProps) {
+export default function OverviewTab({ stats, scoring, tone }: OverviewTabProps) {
   const getReadabilityDescription = (fre: number) => {
     if (fre >= 90) return { label: 'Very Easy', desc: '5th grade reading level. Simple and accessible.', color: 'text-emerald-400 bg-emerald-500/10' };
     if (fre >= 80) return { label: 'Easy', desc: '6th grade reading level. Conversational language.', color: 'text-green-400 bg-green-500/10' };
@@ -230,7 +231,7 @@ export default function OverviewTab({ stats, scoring }: OverviewTabProps) {
       </div>
 
       {/* Advanced Linguistic & Rhythmic Insights */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
         {/* Readability Box */}
         <div className="glass-panel rounded-2xl p-5 flex flex-col justify-between">
           <div>
@@ -247,9 +248,15 @@ export default function OverviewTab({ stats, scoring }: OverviewTabProps) {
               {readability.desc} Lower numbers represent complex structures, while higher scores indicate readable prose.
             </p>
           </div>
-          <div className="mt-4 pt-3 border-t border-slate-800 flex justify-between items-center text-xs">
-            <span className="text-slate-400">Gunning Fog Index</span>
-            <span className="font-semibold text-slate-200">Grade {stats.gunningFog.toFixed(1)}</span>
+          <div className="mt-4 pt-3 border-t border-slate-800 space-y-1.5 text-xs">
+            <div className="flex justify-between items-center">
+              <span className="text-slate-400">Flesch-Kincaid</span>
+              <span className="font-semibold text-slate-200">Grade {stats.fleschKincaidGrade ? stats.fleschKincaidGrade.toFixed(1) : 'N/A'}</span>
+            </div>
+            <div className="flex justify-between items-center">
+              <span className="text-slate-400">Gunning Fog Index</span>
+              <span className="font-semibold text-slate-200">Grade {stats.gunningFog.toFixed(1)}</span>
+            </div>
           </div>
         </div>
 
@@ -288,6 +295,51 @@ export default function OverviewTab({ stats, scoring }: OverviewTabProps) {
           <div className="mt-4 pt-3 border-t border-slate-800 flex justify-between items-center text-xs">
             <span className="text-slate-400">Vocabulary TTR Diversity</span>
             <span className="font-semibold text-slate-200">{(stats.vocabularyDiversity * 100).toFixed(1)}%</span>
+          </div>
+        </div>
+
+        {/* Tone & Compliance Card */}
+        <div className="glass-panel rounded-2xl p-5 flex flex-col justify-between">
+          <div>
+            <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3 flex items-center gap-1">
+              <Sparkles className="w-3.5 h-3.5 text-indigo-400" /> Tone Matrix
+            </h4>
+            {tone ? (
+              <div className="space-y-2">
+                <div className="flex items-center justify-between text-xs text-slate-300">
+                  <span>Positive Tone</span>
+                  <span className="font-bold text-emerald-400">{tone.positivePercent}%</span>
+                </div>
+                <div className="h-1.5 w-full bg-slate-800 rounded-full overflow-hidden">
+                  <div className="h-full bg-emerald-500 rounded-full" style={{ width: `${tone.positivePercent}%` }} />
+                </div>
+
+                <div className="flex items-center justify-between text-xs text-slate-300">
+                  <span>Neutral Tone</span>
+                  <span className="font-bold text-slate-400">{tone.neutralPercent}%</span>
+                </div>
+                <div className="h-1.5 w-full bg-slate-800 rounded-full overflow-hidden">
+                  <div className="h-full bg-slate-550 rounded-full" style={{ width: `${tone.neutralPercent}%` }} />
+                </div>
+
+                <div className="flex items-center justify-between text-xs text-slate-300">
+                  <span>Negative Tone</span>
+                  <span className="font-bold text-rose-400">{tone.negativePercent}%</span>
+                </div>
+                <div className="h-1.5 w-full bg-slate-800 rounded-full overflow-hidden">
+                  <div className="h-full bg-rose-500 rounded-full" style={{ width: `${tone.negativePercent}%` }} />
+                </div>
+              </div>
+            ) : (
+              <div className="flex flex-col items-center justify-center py-6">
+                <RefreshCw className="w-5 h-5 text-indigo-400/60 animate-spin mb-2" />
+                <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">Analyzing Tone...</span>
+              </div>
+            )}
+          </div>
+          <div className="mt-4 pt-3 border-t border-slate-800 flex justify-between items-center text-xs">
+            <span className="text-slate-400">Compliance Shield</span>
+            <span className="font-semibold text-indigo-400">Local &middot; Active</span>
           </div>
         </div>
       </div>

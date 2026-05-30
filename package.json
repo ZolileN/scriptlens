@@ -12,11 +12,21 @@
     "@mlc-ai/web-llm": "^0.2.84",
     "chart.js": "^4.5.1",
     "compromise": "^14.15.1",
+    "harper.js": "^2.0.0",
     "lucide-react": "^1.17.0",
     "next": "16.2.6",
+    "no-cliches": "github:dunckr/no-cliches#db/export-list",
     "react": "19.2.4",
     "react-chartjs-2": "^5.3.1",
-    "react-dom": "19.2.4"
+    "react-dom": "19.2.4",
+    "retext-cliches": "^1.0.0",
+    "retext-english": "^5.0.0",
+    "retext-equality": "^7.1.0",
+    "retext-simplify": "^8.0.0",
+    "retext-stringify": "^4.0.0",
+    "unified": "^11.0.5",
+    "wink-eng-lite-web-model": "^1.8.1",
+    "wink-nlp": "^2.4.0"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",

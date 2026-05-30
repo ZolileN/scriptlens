@@ -17,7 +17,7 @@ import type { WebWorkerMLCEngine, InitProgressReport, ChatCompletionMessageParam
 import { analyzeStatistics, TextStatistics } from '../lib/analysis/statistics';
 import { analyzePatterns, PatternAnalysis } from '../lib/analysis/patterns';
 import { calculateWritingScore, ScoringDetails } from '../lib/analysis/scoring';
-import { generateSuggestions, Suggestion, detectHighlights, HighlightOccurrence } from '../lib/analysis/suggestions';
+import { generateSuggestions, generateSuggestionsAsync, Suggestion, getHighlightsFromSuggestions, HighlightOccurrence } from '../lib/analysis/suggestions';
 
 interface NavigatorWithGpu extends Navigator {
   gpu?: {
@@ -52,6 +52,11 @@ export default function Home() {
   const [patterns, setPatterns] = useState<PatternAnalysis | null>(null);
   const [scoring, setScoring] = useState<ScoringDetails | null>(null);
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
+  const [tone, setTone] = useState<{ positivePercent: number; negativePercent: number; neutralPercent: number } | null>(null);
+  const [redactMode, setRedactMode] = useState(false);
+  const [originalText, setOriginalText] = useState('');
+  const [isAnalysisLoading, setIsAnalysisLoading] = useState(false);
+  const analysisSessionRef = useRef(0);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -80,7 +85,9 @@ export default function Home() {
   useEffect(() => {
     if (typeof navigator !== 'undefined') {
       const gpu = (navigator as NavigatorWithGpu).gpu;
-      setWebGpuSupported(!!gpu);
+      setTimeout(() => {
+        setWebGpuSupported(!!gpu);
+      }, 0);
     }
   }, []);
 
@@ -316,12 +323,28 @@ export default function Home() {
     text: string;
     isLongSentence: boolean;
     isPassive: boolean;
+    isCritical: boolean;
+    isStyle: boolean;
+    isCompliance: boolean;
+    isTone: boolean;
+    startIndex: number;
+    endIndex: number;
   }
 
   const getHighlightSegments = (textStr: string, highlightsList: HighlightOccurrence[]): HighlightSegment[] => {
     if (!textStr) return [];
     if (highlightsList.length === 0) {
-      return [{ text: textStr, isLongSentence: false, isPassive: false }];
+      return [{
+        text: textStr,
+        isLongSentence: false,
+        isPassive: false,
+        isCritical: false,
+        isStyle: false,
+        isCompliance: false,
+        isTone: false,
+        startIndex: 0,
+        endIndex: textStr.length
+      }];
     }
 
     const boundariesSet = new Set<number>([0, textStr.length]);
@@ -339,6 +362,10 @@ export default function Home() {
 
       let isLongSentence = false;
       let isPassive = false;
+      let isCritical = false;
+      let isStyle = false;
+      let isCompliance = false;
+      let isTone = false;
 
       highlightsList.forEach(h => {
         if (start >= h.startIndex && end <= h.endIndex) {
@@ -346,6 +373,14 @@ export default function Home() {
             isLongSentence = true;
           } else if (h.type === 'passive') {
             isPassive = true;
+          } else if (h.type === 'critical') {
+            isCritical = true;
+          } else if (h.type === 'style') {
+            isStyle = true;
+          } else if (h.type === 'compliance') {
+            isCompliance = true;
+          } else if (h.type === 'tone') {
+            isTone = true;
           }
         }
       });
@@ -353,7 +388,13 @@ export default function Home() {
       segmentsList.push({
         text: segmentText,
         isLongSentence,
-        isPassive
+        isPassive,
+        isCritical,
+        isStyle,
+        isCompliance,
+        isTone,
+        startIndex: start,
+        endIndex: end
       });
     }
 
@@ -365,7 +406,7 @@ export default function Home() {
       return <span className="text-slate-100">{text}</span>;
     }
 
-    const highlights = detectHighlights(text);
+    const highlights = getHighlightsFromSuggestions(suggestions, text);
     const segments = getHighlightSegments(text, highlights);
 
     const trailingNode = text.endsWith('\n') ? <span key="trailing" className="text-transparent"> </span> : null;
@@ -373,16 +414,26 @@ export default function Home() {
     const rendered = segments.map((seg, idx) => {
       let classes = "text-transparent";
       
-      if (seg.isLongSentence && seg.isPassive) {
-        classes += " bg-indigo-500/10 border-b-2 border-dashed border-rose-500/50";
+      if (seg.isCritical) {
+        classes += " bg-rose-500/10 border-b border-dotted border-rose-500/70";
+      } else if (seg.isCompliance) {
+        classes += " bg-blue-500/5 border border-solid border-blue-400/50 rounded-xs";
+      } else if (seg.isStyle || seg.isPassive) {
+        classes += " bg-amber-500/15 border-b border-dashed border-amber-400/60";
+      } else if (seg.isTone) {
+        classes += " bg-violet-500/10 border-b border-dashed border-violet-400/60";
       } else if (seg.isLongSentence) {
         classes += " bg-indigo-500/10 border-b border-dashed border-indigo-400/60";
-      } else if (seg.isPassive) {
-        classes += " bg-amber-500/15 border-b border-dashed border-amber-400/60";
       }
 
       return (
-        <span key={idx} className={classes} style={{ textDecoration: 'none' }}>
+        <span
+          key={idx}
+          data-start={seg.startIndex}
+          data-end={seg.endIndex}
+          className={classes}
+          style={{ textDecoration: 'none' }}
+        >
           {seg.text}
         </span>
       );
@@ -396,7 +447,7 @@ export default function Home() {
     );
   };
 
-  const handleHighlight = (textToHighlight: string) => {
+  const handleHighlight = (textToHighlight: string, category?: string) => {
     if (!textareaRef.current || !text) return;
 
     // Clean the search string from UI labels or trailing ellipses
@@ -404,51 +455,145 @@ export default function Home() {
     searchStr = searchStr.replace(/^Phrase:\s*"/, '').replace(/"\s*\(used \d+ times\)$/, '');
     searchStr = searchStr.replace(/^"/, '').replace(/"\s*\(used \d+ times\)$/, '');
 
-    const startIndex = text.toLowerCase().indexOf(searchStr.toLowerCase());
+    // Get all parsed highlight occurrences to match the exact start and end index
+    const highlights = getHighlightsFromSuggestions(suggestions, text);
+    
+    // Find the highlight that best matches the search text and category/type
+    let startIndex = -1;
+    let endIndex = -1;
+    
+    // Filter highlights that match the text
+    const matchedHighlights = highlights.filter(h => {
+      const cleanH = h.text.toLowerCase().trim();
+      const cleanSearch = searchStr.toLowerCase().trim();
+      return cleanH === cleanSearch || cleanH.includes(cleanSearch) || cleanSearch.includes(cleanH);
+    });
+
+    if (matchedHighlights.length > 0) {
+      // Try to match by type if category is provided
+      let bestMatch = matchedHighlights[0];
+      if (category) {
+        let expectedType: HighlightOccurrence['type'] = 'style';
+        if (category === 'sentence') {
+          expectedType = 'long-sentence';
+        } else if (category === 'style') {
+          expectedType = 'style';
+        } else if (category === 'spelling' || category === 'grammar') {
+          expectedType = 'critical';
+        } else if (category === 'compliance') {
+          expectedType = 'compliance';
+        } else if (category === 'rhythm') {
+          expectedType = 'tone';
+        }
+
+        const typeMatch = matchedHighlights.find(h => h.type === expectedType || (category === 'style' && h.type === 'passive'));
+        if (typeMatch) {
+          bestMatch = typeMatch;
+        }
+      }
+      startIndex = bestMatch.startIndex;
+      endIndex = bestMatch.endIndex;
+    } else {
+      // Fallback to simple indexOf lookup
+      startIndex = text.toLowerCase().indexOf(searchStr.toLowerCase());
+      if (startIndex !== -1) {
+        endIndex = startIndex + searchStr.length;
+      }
+    }
+
     if (startIndex !== -1) {
-      const endIndex = startIndex + searchStr.length;
       textareaRef.current.focus();
       textareaRef.current.setSelectionRange(startIndex, endIndex);
 
-      // Smooth scroll to selection:
-      // Count newlines before the selection start to approximate the line number
-      const textBefore = text.substring(0, startIndex);
-      const linesBefore = (textBefore.match(/\n/g) || []).length;
-      
-      // Fetch line-height styling of the textarea
-      const style = window.getComputedStyle(textareaRef.current);
-      const lineHeight = parseInt(style.lineHeight) || 20;
-      
-      // Center the highlighted line inside the textarea container
-      const targetScrollTop = Math.max(
-        0,
-        (linesBefore * lineHeight) - (textareaRef.current.clientHeight / 2) + (lineHeight / 2)
-      );
+      // Locate corresponding visual element in the backdrop container to handle text wrapping accurately
+      let targetScrollTop = 0;
+      let foundSpan = false;
+
+      if (backdropRef.current) {
+        const spans = backdropRef.current.querySelectorAll('span[data-start]');
+        for (let i = 0; i < spans.length; i++) {
+          const span = spans[i] as HTMLSpanElement;
+          const start = parseInt(span.getAttribute('data-start') || '0');
+          const end = parseInt(span.getAttribute('data-end') || '0');
+
+          // Check if this span contains or overlaps the selection start
+          if (start <= startIndex && end >= endIndex) {
+            const offsetTop = span.offsetTop;
+            const containerHeight = textareaRef.current.clientHeight;
+            const elementHeight = span.offsetHeight;
+
+            // Center the highlighted element in the editor viewport
+            targetScrollTop = Math.max(0, offsetTop - (containerHeight / 2) + (elementHeight / 2));
+            foundSpan = true;
+            break;
+          }
+        }
+      }
+
+      if (!foundSpan) {
+        // Fallback calculation using line numbers if backdrop span isn't found
+        const textBefore = text.substring(0, startIndex);
+        const linesBefore = (textBefore.match(/\n/g) || []).length;
+        const style = window.getComputedStyle(textareaRef.current);
+        const lineHeight = parseInt(style.lineHeight) || 20;
+        targetScrollTop = Math.max(
+          0,
+          (linesBefore * lineHeight) - (textareaRef.current.clientHeight / 2) + (lineHeight / 2)
+        );
+      }
 
       textareaRef.current.scrollTo({
         top: targetScrollTop,
         behavior: 'smooth'
       });
+
+      // Synchronize the backdrop scroll simultaneously to ensure zero-lag visual alignment
+      if (backdropRef.current) {
+        backdropRef.current.scrollTo({
+          top: targetScrollTop,
+          behavior: 'smooth'
+        });
+      }
     }
   };
 
   // Analyze function
-  const runAnalysis = (rawText: string) => {
+  const runAnalysis = async (rawText: string) => {
+    const sessionId = ++analysisSessionRef.current;
     const start = performance.now();
     
     // Compute metrics
     const computedStats = analyzeStatistics(rawText);
     const computedPatterns = analyzePatterns(rawText);
     const computedScoring = calculateWritingScore(rawText, computedStats, computedPatterns);
-    const computedSuggestions = generateSuggestions(rawText, computedStats, computedPatterns);
+    const syncSuggestions = generateSuggestions(rawText, computedStats, computedPatterns);
+
+    if (sessionId !== analysisSessionRef.current) return;
 
     setStats(computedStats);
     setPatterns(computedPatterns);
     setScoring(computedScoring);
-    setSuggestions(computedSuggestions);
+    setSuggestions(syncSuggestions);
 
-    const end = performance.now();
-    setAnalysisTimeMs(Math.round(end - start));
+    setIsAnalysisLoading(true);
+    try {
+      const result = await generateSuggestionsAsync(rawText, computedStats, computedPatterns);
+      
+      if (sessionId !== analysisSessionRef.current) return;
+      
+      setSuggestions(result.suggestions);
+      if (result.tone) {
+        setTone(result.tone);
+      }
+    } catch (err) {
+      console.error("Advanced analysis run failed:", err);
+    } finally {
+      if (sessionId === analysisSessionRef.current) {
+        setIsAnalysisLoading(false);
+        const end = performance.now();
+        setAnalysisTimeMs(Math.round(end - start));
+      }
+    }
   };
 
   // Debounced auto-analysis for larger texts to maintain typing responsiveness
@@ -553,7 +698,7 @@ export default function Home() {
 
     switch (activeTab) {
       case 'overview':
-        return <OverviewTab stats={stats} scoring={scoring} />;
+        return <OverviewTab stats={stats} scoring={scoring} tone={tone} />;
       case 'patterns':
         return <PatternsTab patterns={patterns} />;
       case 'suggestions':
@@ -630,6 +775,29 @@ export default function Home() {
             </h2>
             <div className="flex items-center gap-2">
               <button
+                onClick={async () => {
+                  if (!redactMode) {
+                    setOriginalText(text);
+                    const { anonymizeText } = await import('../lib/analysis/suggestions');
+                    const redacted = await anonymizeText(text);
+                    setText(redacted);
+                    setRedactMode(true);
+                    runAnalysis(redacted);
+                  } else {
+                    setText(originalText);
+                    setRedactMode(false);
+                    runAnalysis(originalText);
+                  }
+                }}
+                className={`text-[10px] font-bold px-2.5 py-1 rounded border transition flex items-center gap-1 cursor-pointer select-none ${
+                  redactMode
+                    ? 'text-rose-400 bg-rose-500/10 border-rose-500/20 hover:bg-rose-500/20'
+                    : 'text-slate-400 bg-slate-800/40 border-slate-700/25 hover:bg-slate-800/80'
+                }`}
+              >
+                <ShieldCheck className="w-3 h-3 text-rose-400" /> Redact Document: {redactMode ? 'ON' : 'OFF'}
+              </button>
+              <button
                 onClick={() => setShowHighlights(!showHighlights)}
                 className={`text-[10px] font-bold px-2.5 py-1 rounded border transition flex items-center gap-1 cursor-pointer select-none ${
                   showHighlights
@@ -640,13 +808,23 @@ export default function Home() {
                 <Sparkles className="w-3 h-3 text-indigo-400" /> Highlights: {showHighlights ? 'ON' : 'OFF'}
               </button>
               <button
-                onClick={loadSample}
+                onClick={() => {
+                  if (redactMode) {
+                    setRedactMode(false);
+                  }
+                  loadSample();
+                }}
                 className="text-[10px] font-bold text-indigo-400 hover:text-indigo-300 bg-indigo-500/5 hover:bg-indigo-500/10 px-2.5 py-1 rounded border border-indigo-500/10 hover:border-indigo-500/20 transition flex items-center gap-1"
               >
                 <Sparkles className="w-3 h-3 animate-pulse" /> Load Sample
               </button>
               <button
-                onClick={clearText}
+                onClick={() => {
+                  if (redactMode) {
+                    setRedactMode(false);
+                  }
+                  clearText();
+                }}
                 className="text-[10px] font-bold text-slate-400 hover:text-slate-200 bg-slate-800/40 hover:bg-slate-800/80 px-2.5 py-1 rounded border border-slate-700/20 transition flex items-center gap-1"
               >
                 <Eraser className="w-3 h-3" /> Clear
@@ -916,7 +1094,7 @@ export default function Home() {
           </div>
 
           {/* Active Tab Panel glass wrapper */}
-          <div className="grow glass-panel rounded-2xl p-6 overflow-y-auto max-h-[calc(100vh-210px)] min-h-[420px]">
+          <div className="grow glass-panel rounded-2xl p-6 overflow-y-auto max-h-[calc(100vh-170px)] min-h-[420px]">
             {renderTabContent()}
           </div>
         </div>
